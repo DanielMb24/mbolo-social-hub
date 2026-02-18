@@ -1,71 +1,242 @@
 import { useState } from "react";
-import { MessageCircle, Users, Video, Home, User, Search, Bell } from "lucide-react";
+import {
+  MessageCircle, Users, Video, Home, User, Search, Bell,
+  Settings, Menu, X, TrendingUp, PlusCircle, LogOut
+} from "lucide-react";
 import FeedPage from "@/components/mbolo/FeedPage";
 import ChatPage from "@/components/mbolo/ChatPage";
 import VideoPage from "@/components/mbolo/VideoPage";
 import ProfilePage from "@/components/mbolo/ProfilePage";
 import AuthPage from "@/components/mbolo/AuthPage";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type Tab = "feed" | "chat" | "videos" | "profile";
+
+const NAV_ITEMS: { id: Tab; icon: React.ElementType; label: string }[] = [
+  { id: "feed", icon: Home, label: "Fil d'actualité" },
+  { id: "chat", icon: MessageCircle, label: "Messages" },
+  { id: "videos", icon: Video, label: "Vidéos" },
+  { id: "profile", icon: User, label: "Mon Profil" },
+];
 
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("feed");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   if (!isAuthenticated) {
     return <AuthPage onLogin={() => setIsAuthenticated(true)} />;
   }
 
-  const tabs: { id: Tab; icon: React.ElementType; label: string }[] = [
-    { id: "feed", icon: Home, label: "Feed" },
-    { id: "chat", icon: MessageCircle, label: "Chat" },
-    { id: "videos", icon: Video, label: "Vidéos" },
-    { id: "profile", icon: User, label: "Profil" },
-  ];
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab);
+    if (isMobile) setMobileMenuOpen(false);
+  };
 
   return (
-    <div className="flex flex-col h-screen bg-background">
-      {/* Top bar */}
-      <header className="flex items-center justify-between px-4 py-3 border-b bg-background sticky top-0 z-50">
-        <h1 className="text-xl font-bold text-primary">MBolo</h1>
-        <div className="flex items-center gap-3">
-          <button className="p-2 rounded-full hover:bg-muted transition-colors">
-            <Search className="w-5 h-5 text-muted-foreground" />
-          </button>
-          <button className="p-2 rounded-full hover:bg-muted transition-colors relative">
-            <Bell className="w-5 h-5 text-muted-foreground" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-          </button>
-        </div>
-      </header>
+    <div className="flex h-screen bg-background overflow-hidden">
+      {/* Desktop Sidebar */}
+      {!isMobile && (
+        <aside
+          className={`${
+            sidebarOpen ? "w-64" : "w-[72px]"
+          } h-full border-r bg-card flex flex-col transition-all duration-300 shrink-0`}
+        >
+          {/* Logo */}
+          <div className="flex items-center gap-3 px-4 h-16 border-b shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shrink-0">
+              <MessageCircle className="w-5 h-5 text-primary-foreground" />
+            </div>
+            {sidebarOpen && (
+              <span className="text-xl font-extrabold text-primary tracking-tight">MBolo</span>
+            )}
+          </div>
 
-      {/* Content */}
-      <main className="flex-1 overflow-y-auto">
-        {activeTab === "feed" && <FeedPage />}
-        {activeTab === "chat" && <ChatPage />}
-        {activeTab === "videos" && <VideoPage />}
-        {activeTab === "profile" && <ProfilePage onLogout={() => setIsAuthenticated(false)} />}
-      </main>
+          {/* Nav */}
+          <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleTabChange(item.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+                    isActive
+                      ? "bg-primary text-primary-foreground shadow-md"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="w-5 h-5 shrink-0" />
+                  {sidebarOpen && (
+                    <span className="text-sm font-medium truncate">{item.label}</span>
+                  )}
+                  {item.id === "chat" && (
+                    <span className={`ml-auto w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${
+                      isActive ? "bg-primary-foreground/20 text-primary-foreground" : "bg-destructive text-destructive-foreground"
+                    }`}>3</span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
 
-      {/* Bottom nav */}
-      <nav className="flex items-center justify-around border-t bg-background py-2 sticky bottom-0 z-50">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
+          {/* Sidebar footer */}
+          <div className="border-t p-3 space-y-1">
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition-colors ${
-                isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
             >
-              <Icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
-              <span className="text-xs font-medium">{tab.label}</span>
+              <Menu className="w-5 h-5 shrink-0" />
+              {sidebarOpen && <span className="text-sm font-medium">Réduire</span>}
             </button>
-          );
-        })}
-      </nav>
+            <button
+              onClick={() => setIsAuthenticated(false)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
+            >
+              <LogOut className="w-5 h-5 shrink-0" />
+              {sidebarOpen && <span className="text-sm font-medium">Déconnexion</span>}
+            </button>
+          </div>
+        </aside>
+      )}
+
+      {/* Main content area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top header */}
+        <header className="flex items-center justify-between px-4 h-14 border-b bg-card shrink-0 z-40">
+          <div className="flex items-center gap-3">
+            {isMobile && (
+              <button onClick={() => setMobileMenuOpen(true)} className="p-2 -ml-2 rounded-lg hover:bg-muted transition-colors">
+                <Menu className="w-5 h-5 text-foreground" />
+              </button>
+            )}
+            {isMobile && (
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
+                  <MessageCircle className="w-4 h-4 text-primary-foreground" />
+                </div>
+                <span className="text-lg font-extrabold text-primary">MBolo</span>
+              </div>
+            )}
+            {!isMobile && (
+              <h2 className="text-lg font-bold text-foreground">
+                {NAV_ITEMS.find(n => n.id === activeTab)?.label}
+              </h2>
+            )}
+          </div>
+
+          {/* Desktop tabs in header */}
+          {isMobile && (
+            <div className="flex items-center gap-1">
+              {NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleTabChange(item.id)}
+                    className={`p-2 rounded-lg transition-colors relative ${
+                      isActive ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Icon className="w-5 h-5" />
+                    {item.id === "chat" && (
+                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center">3</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1">
+            <button className="p-2 rounded-lg hover:bg-muted transition-colors">
+              <Search className="w-5 h-5 text-muted-foreground" />
+            </button>
+            <button className="p-2 rounded-lg hover:bg-muted transition-colors relative">
+              <Bell className="w-5 h-5 text-muted-foreground" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />
+            </button>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className="flex-1 overflow-y-auto">
+          {activeTab === "feed" && <FeedPage />}
+          {activeTab === "chat" && <ChatPage />}
+          {activeTab === "videos" && <VideoPage />}
+          {activeTab === "profile" && <ProfilePage onLogout={() => setIsAuthenticated(false)} />}
+        </main>
+      </div>
+
+      {/* Mobile menu overlay */}
+      {isMobile && mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          <div className="absolute inset-0 bg-foreground/40" onClick={() => setMobileMenuOpen(false)} />
+          <div className="relative w-72 bg-card h-full shadow-2xl flex flex-col animate-slide-in-left">
+            <div className="flex items-center justify-between px-4 h-16 border-b">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
+                  <MessageCircle className="w-5 h-5 text-primary-foreground" />
+                </div>
+                <span className="text-xl font-extrabold text-primary">MBolo</span>
+              </div>
+              <button onClick={() => setMobileMenuOpen(false)} className="p-2 rounded-lg hover:bg-muted">
+                <X className="w-5 h-5 text-foreground" />
+              </button>
+            </div>
+
+            {/* User info */}
+            <div className="p-4 border-b">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-lg">U</div>
+                <div>
+                  <p className="font-semibold text-foreground">Utilisateur MBolo</p>
+                  <p className="text-xs text-muted-foreground">@user_mbolo</p>
+                </div>
+              </div>
+              <div className="flex gap-4 mt-3 text-sm">
+                <span className="text-foreground"><strong>1.2k</strong> <span className="text-muted-foreground">abonnés</span></span>
+                <span className="text-foreground"><strong>340</strong> <span className="text-muted-foreground">abonnements</span></span>
+              </div>
+            </div>
+
+            <nav className="flex-1 py-3 px-2 space-y-1">
+              {NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleTabChange(item.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <Icon className="w-5 h-5" />
+                    <span className="text-sm font-medium">{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="border-t p-3">
+              <button
+                onClick={() => { setIsAuthenticated(false); setMobileMenuOpen(false); }}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-destructive hover:bg-destructive/10 transition-all"
+              >
+                <LogOut className="w-5 h-5" />
+                <span className="text-sm font-medium">Déconnexion</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
