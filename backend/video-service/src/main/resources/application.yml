@@ -1,0 +1,18 @@
+server:
+  port: 8085
+spring:
+  application:
+    name: video-service
+  data:
+    mongodb:
+      uri: mongodb://localhost:27021/mbolo_video
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+minio:
+  endpoint: http://minio:9000
+  access-key: mbolo_admin
+  secret-key: mbolo_secret_2025
+  bucket: mbolo-videos

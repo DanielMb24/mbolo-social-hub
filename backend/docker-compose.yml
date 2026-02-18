@@ -1,0 +1,195 @@
+version: '3.8'
+
+services:
+  # ==================== DATABASES ====================
+  mongo-auth:
+    image: mongo:7
+    container_name: mbolo-mongo-auth
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-auth-data:/data/db
+    networks:
+      - mb-network
+
+  mongo-user:
+    image: mongo:7
+    container_name: mbolo-mongo-user
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-user-data:/data/db
+    networks:
+      - mb-network
+
+  mongo-chat:
+    image: mongo:7
+    container_name: mbolo-mongo-chat
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo-chat-data:/data/db
+    networks:
+      - mb-network
+
+  mongo-post:
+    image: mongo:7
+    container_name: mbolo-mongo-post
+    ports:
+      - "27020:27017"
+    volumes:
+      - mongo-post-data:/data/db
+    networks:
+      - mb-network
+
+  mongo-video:
+    image: mongo:7
+    container_name: mbolo-mongo-video
+    ports:
+      - "27021:27017"
+    volumes:
+      - mongo-video-data:/data/db
+    networks:
+      - mb-network
+
+  mongo-moderation:
+    image: mongo:7
+    container_name: mbolo-mongo-moderation
+    ports:
+      - "27022:27017"
+    volumes:
+      - mongo-moderation-data:/data/db
+    networks:
+      - mb-network
+
+  # ==================== INFRASTRUCTURE ====================
+  redis:
+    image: redis:7-alpine
+    container_name: mbolo-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - mb-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: mbolo-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: mbolo_admin
+      MINIO_ROOT_PASSWORD: mbolo_secret_2025
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - mb-network
+
+  # ==================== MICROSERVICES ====================
+  api-gateway:
+    build: ./api-gateway
+    container_name: mbolo-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      - redis
+    networks:
+      - mb-network
+
+  auth-service:
+    build: ./auth-service
+    container_name: mbolo-auth
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo-auth:27017/mbolo_auth
+    depends_on:
+      - mongo-auth
+      - redis
+    networks:
+      - mb-network
+
+  user-service:
+    build: ./user-service
+    container_name: mbolo-user
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo-user:27017/mbolo_user
+    depends_on:
+      - mongo-user
+      - minio
+    networks:
+      - mb-network
+
+  chat-service:
+    build: ./chat-service
+    container_name: mbolo-chat
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo-chat:27017/mbolo_chat
+    depends_on:
+      - mongo-chat
+      - redis
+    networks:
+      - mb-network
+
+  post-service:
+    build: ./post-service
+    container_name: mbolo-post
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo-post:27017/mbolo_post
+    depends_on:
+      - mongo-post
+    networks:
+      - mb-network
+
+  video-service:
+    build: ./video-service
+    container_name: mbolo-video
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo-video:27017/mbolo_video
+    depends_on:
+      - mongo-video
+      - minio
+    networks:
+      - mb-network
+
+  moderation-service:
+    build: ./moderation-service
+    container_name: mbolo-moderation
+    ports:
+      - "8086:8086"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo-moderation:27017/mbolo_moderation
+    depends_on:
+      - mongo-moderation
+    networks:
+      - mb-network
+
+networks:
+  mb-network:
+    driver: bridge
+
+volumes:
+  mongo-auth-data:
+  mongo-user-data:
+  mongo-chat-data:
+  mongo-post-data:
+  mongo-video-data:
+  mongo-moderation-data:
+  minio-data:
