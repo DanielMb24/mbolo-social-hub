@@ -9,10 +9,11 @@ export interface ApiResponse<T = any> {
 }
 
 export interface AuthResponse {
+  success: boolean;
   accessToken: string;
   refreshToken: string;
   userId: string;
-  username: string;
+  message: string;
 }
 
 export interface LoginRequest {
@@ -31,19 +32,22 @@ export interface UserProfile {
   id: string;
   username: string;
   email: string;
-  fullName?: string;
+  fullname?: string;
   bio?: string;
   avatarUrl?: string;
+  location?: string;
+  followersCount?: number;
+  followingCount?: number;
   createdAt: string;
 }
 
 export interface Post {
   id: string;
-  userId: string;
+  authorId: string;
   content: string;
   mediaUrls?: string[];
-  likes: number;
-  comments: number;
+  likes: string[];
+  commentsCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,7 +55,7 @@ export interface Post {
 export interface Comment {
   id: string;
   postId: string;
-  userId: string;
+  authorId: string;
   content: string;
   createdAt: string;
 }
@@ -87,13 +91,15 @@ export interface Conversation {
 
 // Token management
 export const tokenManager = {
-  getAccessToken: () => localStorage.getItem('accessToken'),
+  getAccessToken: () => localStorage.getItem('token') || localStorage.getItem('accessToken'),
   getRefreshToken: () => localStorage.getItem('refreshToken'),
   setTokens: (accessToken: string, refreshToken: string) => {
+    localStorage.setItem('token', accessToken);
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshToken);
   },
   clearTokens: () => {
+    localStorage.removeItem('token');
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('userId');
@@ -146,30 +152,42 @@ class ApiClient {
           return this.handleResponse<T>(retryResponse);
         } else {
           tokenManager.clearTokens();
-          window.location.href = '/auth';
+          window.location.href = '/';
           throw new Error('Session expired. Please login again.');
         }
       }
       
       return this.handleResponse<T>(response);
     } catch (error) {
-      console.error('API Request Error:', error);
+      // Ne pas logger les 404 pour éviter le spam dans la console
+      if (!(error instanceof Error && error.message.includes('404'))) {
+        console.error('API Request Error:', error);
+      }
       throw error;
     }
   }
 
   private async handleResponse<T>(response: Response): Promise<T> {
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `API Error: ${response.status}`);
-    }
-    
     const contentType = response.headers.get('content-type');
+    let responseData: any;
+    
     if (contentType && contentType.includes('application/json')) {
-      return response.json();
+      responseData = await response.json();
+    } else {
+      responseData = await response.text();
     }
     
-    return response.text() as any;
+    if (!response.ok) {
+      const errorMessage = responseData?.message || 
+                          responseData?.error || 
+                          (typeof responseData === 'string' ? responseData : '') ||
+                          `Erreur ${response.status}: ${response.statusText}`;
+      const error = new Error(errorMessage);
+      (error as any).response = { data: responseData, status: response.status };
+      throw error;
+    }
+    
+    return responseData;
   }
 
   private async refreshToken(): Promise<boolean> {
@@ -184,9 +202,11 @@ class ApiClient {
       });
 
       if (response.ok) {
-        const data: AuthResponse = await response.json();
-        tokenManager.setTokens(data.accessToken, data.refreshToken);
-        return true;
+        const apiResponse: ApiResponse<AuthResponse> = await response.json();
+        if (apiResponse.data) {
+          tokenManager.setTokens(apiResponse.data.accessToken, apiResponse.data.refreshToken);
+          return true;
+        }
       }
       return false;
     } catch {
@@ -247,19 +267,25 @@ export const api = new ApiClient(API_BASE_URL);
 
 // Auth API
 export const authApi = {
-  login: (data: LoginRequest) => 
-    api.post<AuthResponse>('/api/auth/login', data),
+  login: async (data: LoginRequest) => {
+    const response = await api.post<ApiResponse<AuthResponse>>('/api/auth/login', data);
+    return response.data!;
+  },
   
-  register: (data: RegisterRequest) => 
-    api.post<AuthResponse>('/api/auth/register', data),
+  register: async (data: RegisterRequest) => {
+    const response = await api.post<ApiResponse<AuthResponse>>('/api/auth/register', data);
+    return response.data!;
+  },
   
   logout: () => {
     tokenManager.clearTokens();
     return Promise.resolve();
   },
   
-  refreshToken: (refreshToken: string) => 
-    api.post<AuthResponse>('/api/auth/refresh', { refreshToken }),
+  refreshToken: async (refreshToken: string) => {
+    const response = await api.post<ApiResponse<AuthResponse>>('/api/auth/refresh', { refreshToken });
+    return response.data!;
+  },
   
   getCurrentUser: () => 
     api.get<UserProfile>('/api/auth/me'),
@@ -267,17 +293,23 @@ export const authApi = {
 
 // User API
 export const userApi = {
-  getProfile: (userId: string) => 
-    api.get<UserProfile>(`/api/users/${userId}`),
+  getProfile: async (userId: string) => {
+    const response = await api.get<ApiResponse<UserProfile>>(`/api/users/${userId}`);
+    return response.data!;
+  },
   
-  updateProfile: (userId: string, data: Partial<UserProfile>) => 
-    api.put<UserProfile>(`/api/users/${userId}`, data),
+  updateProfile: async (userId: string, data: Partial<UserProfile>) => {
+    const response = await api.put<ApiResponse<UserProfile>>(`/api/users/${userId}`, data);
+    return response.data!;
+  },
   
   uploadAvatar: (userId: string, file: File) => 
     api.uploadFile(`/api/users/${userId}/avatar`, file),
   
-  searchUsers: (query: string) => 
-    api.get<UserProfile[]>(`/api/users/search?q=${encodeURIComponent(query)}`),
+  searchUsers: async (query: string) => {
+    const response = await api.get<ApiResponse<UserProfile[]>>(`/api/users/search?q=${encodeURIComponent(query)}`);
+    return response.data!;
+  },
   
   followUser: (userId: string) => 
     api.post(`/api/users/${userId}/follow`),
@@ -285,27 +317,46 @@ export const userApi = {
   unfollowUser: (userId: string) => 
     api.delete(`/api/users/${userId}/follow`),
   
-  getFollowers: (userId: string) => 
-    api.get<UserProfile[]>(`/api/users/${userId}/followers`),
+  getFollowers: async (userId: string) => {
+    const response = await api.get<ApiResponse<UserProfile[]>>(`/api/users/${userId}/followers`);
+    return response.data!;
+  },
   
-  getFollowing: (userId: string) => 
-    api.get<UserProfile[]>(`/api/users/${userId}/following`),
+  getFollowing: async (userId: string) => {
+    const response = await api.get<ApiResponse<UserProfile[]>>(`/api/users/${userId}/following`);
+    return response.data!;
+  },
+
+  isFollowing: async (userId: string) => {
+    const response = await api.get<ApiResponse<boolean>>(`/api/users/${userId}/is-following`);
+    return response.data!;
+  },
 };
 
 // Post API
 export const postApi = {
-  getFeed: (page = 0, size = 20) => 
-    api.get<Post[]>(`/api/posts/feed?page=${page}&size=${size}`),
+  getFeed: async (page = 0, size = 20) => {
+    try {
+      const res = await api.get<any>(`/api/posts?page=${page}&size=${size}`);
+      // Le backend retourne { success: true, data: { content: [...], ... } }
+      return res.data?.data?.content || res.data?.content || [];
+    } catch (error) {
+      console.error('getFeed error:', error);
+      return []; // Retourner un tableau vide en cas d'erreur
+    }
+  },
   
-  getPost: (postId: string) => 
-    api.get<Post>(`/api/posts/${postId}`),
+  getPost: async (postId: string) => {
+    const response = await api.get<ApiResponse<Post>>(`/api/posts/${postId}`);
+    return response.data!;
+  },
   
-  createPost: (content: string, mediaFiles?: File[]) => {
+  createPost: (data: { content: string }, mediaFiles?: File[]) => {
     if (mediaFiles && mediaFiles.length > 0) {
       // Handle file upload separately
-      return api.uploadFile('/api/posts', mediaFiles[0], { content });
+      return api.uploadFile('/api/posts', mediaFiles[0], { content: data.content });
     }
-    return api.post<Post>('/api/posts', { content });
+    return api.post<Post>('/api/posts', data);
   },
   
   deletePost: (postId: string) => 
@@ -317,11 +368,20 @@ export const postApi = {
   unlikePost: (postId: string) => 
     api.delete(`/api/posts/${postId}/like`),
   
-  getComments: (postId: string) => 
-    api.get<Comment[]>(`/api/posts/${postId}/comments`),
+  getComments: async (postId: string) => {
+    const response = await api.get<ApiResponse<any>>(`/api/posts/${postId}/comments`);
+    // Le backend retourne un objet paginé avec content
+    const data = response.data;
+    if (data && typeof data === 'object' && 'content' in data) {
+      return data.content || [];
+    }
+    return Array.isArray(data) ? data : [];
+  },
   
-  addComment: (postId: string, content: string) => 
-    api.post<Comment>(`/api/posts/${postId}/comments`, { content }),
+  addComment: async (postId: string, content: string) => {
+    const response = await api.post<ApiResponse<Comment>>(`/api/posts/${postId}/comments`, { content });
+    return response.data!;
+  },
   
   deleteComment: (postId: string, commentId: string) => 
     api.delete(`/api/posts/${postId}/comments/${commentId}`),

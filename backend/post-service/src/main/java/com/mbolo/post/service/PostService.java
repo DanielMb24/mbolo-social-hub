@@ -26,6 +26,11 @@ public class PostService {
             PageRequest.of(page, size, Sort.by("createdAt").descending()));
     }
 
+    public java.util.Optional<Post> getPostById(String postId) {
+        return postRepository.findById(postId)
+                .filter(post -> !post.isDeleted());
+    }
+
     public Page<Post> getUserPosts(String authorId, int page, int size) {
         return postRepository.findByAuthorIdAndDeletedFalseOrderByCreatedAtDesc(
             authorId, PageRequest.of(page, size));

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Eye, EyeOff, MessageCircle, ArrowRight, Users, Video, Shield } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
-import { authApi } from "@/lib/api";
+import { authApi, userApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 
 interface AuthPageProps {
@@ -31,6 +31,11 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
       if (isLogin) {
         // Login
         const response = await authApi.login({ username, password });
+        
+        if (!response.accessToken || !response.userId) {
+          throw new Error('Réponse invalide du serveur');
+        }
+        
         localStorage.setItem('token', response.accessToken);
         localStorage.setItem('refreshToken', response.refreshToken);
         localStorage.setItem('userId', response.userId);
@@ -38,15 +43,42 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
         onLogin();
       } else {
         // Register
-        await authApi.register({ username, email, password });
-        toast({ title: "Inscription réussie !", description: "Vous pouvez maintenant vous connecter" });
-        setIsLogin(true);
-        setPassword("");
+        const response = await authApi.register({ username, email, password });
+        
+        if (!response.accessToken || !response.userId) {
+          throw new Error('Réponse invalide du serveur');
+        }
+        
+        localStorage.setItem('token', response.accessToken);
+        localStorage.setItem('refreshToken', response.refreshToken);
+        localStorage.setItem('userId', response.userId);
+        
+        // Créer le profil utilisateur
+        try {
+          await userApi.updateProfile(response.userId, {
+            username: username,
+            email: email,
+            fullname: username,
+            bio: 'Nouveau membre de MBolo 🇬🇦'
+          });
+        } catch (profileError) {
+          console.log('Profile creation skipped or failed:', profileError);
+        }
+        
+        toast({ title: "Inscription réussie !", description: "Bienvenue sur MBolo !" });
+        onLogin();
       }
     } catch (error: any) {
+      console.error("Full auth error:", error);
+      console.error("Error response:", error.response);
+      console.error("Error message:", error.message);
+      
+      const errorMessage = error.response?.data?.message || 
+                          error.message || 
+                          "Une erreur est survenue lors de l'authentification";
       toast({
         title: "Erreur",
-        description: error.response?.data?.message || "Une erreur est survenue",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {

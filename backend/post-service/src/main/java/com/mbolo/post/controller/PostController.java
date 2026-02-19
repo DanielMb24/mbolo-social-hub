@@ -39,6 +39,13 @@ public class PostController {
         )));
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<Map<String, Object>> getPost(@PathVariable String id) {
+        return postService.getPostById(id)
+                .map(post -> ResponseEntity.ok(Map.of("success", true, "data", post)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/{id}/like")
     public ResponseEntity<Map<String, Object>> toggleLike(
             @PathVariable String id,

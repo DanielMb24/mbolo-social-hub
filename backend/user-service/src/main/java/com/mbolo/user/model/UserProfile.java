@@ -15,6 +15,9 @@ public class UserProfile {
     @Id
     private String id;
 
+    private String username;
+    private String email;
+
     @TextIndexed
     private String fullname;
 

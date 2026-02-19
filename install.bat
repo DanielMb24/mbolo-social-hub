@@ -35,7 +35,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-
+    
 echo ✅ Node.js est installé
 
 REM Vérifier npm
@@ -98,7 +98,11 @@ echo ═════════════════════════
 echo 🗄️  Initialisation des bases de données...
 echo ════════════════════════════════════════════════════════════
 
-call init-databases.bat
+call .\init-databases.bat
+
+echo.
+echo 🌱 Insertion de données de test...
+call .\seed-test-data.bat
 
 echo.
 echo ════════════════════════════════════════════════════════════
