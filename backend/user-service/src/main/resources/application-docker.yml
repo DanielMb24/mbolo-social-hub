@@ -1,0 +1,14 @@
+server:
+  port: 8082
+spring:
+  application:
+    name: user-service
+  data:
+    mongodb:
+      uri: mongodb+srv://devgroupentreprise_db_user:LWC5S7GRgfB2KN84@cluster-dga-1.xylzvke.mongodb.net/mbolo_user?retryWrites=true&w=majority
+
+minio:
+  endpoint: http://minio:9000
+  access-key: ${MINIO_ACCESS_KEY:mbolo_admin}
+  secret-key: ${MINIO_SECRET_KEY:mbolo_secret_2025}
+  bucket: mbolo-avatars

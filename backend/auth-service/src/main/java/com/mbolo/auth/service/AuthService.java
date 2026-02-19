@@ -22,13 +22,19 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
 
     public AuthResponse register(RegisterRequest request) {
-        if (userAuthRepository.existsByPhone(request.getPhone())) {
-            return new AuthResponse(false, null, null, null, "Ce numéro est déjà enregistré");
+        if (userAuthRepository.existsByUsername(request.getUsername())) {
+            return new AuthResponse(false, null, null, null, "Ce nom d'utilisateur est déjà pris");
+        }
+        
+        if (userAuthRepository.existsByEmail(request.getEmail())) {
+            return new AuthResponse(false, null, null, null, "Cet email est déjà enregistré");
         }
 
         UserAuth user = new UserAuth();
-        user.setPhone(request.getPhone());
+        user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
+        user.setFullName(request.getFullName());
+        user.setPhone(request.getPhone());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         userAuthRepository.save(user);
 
@@ -39,7 +45,10 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest request) {
-        UserAuth user = userAuthRepository.findByPhone(request.getPhone())
+        // Essayer de trouver l'utilisateur par username, email ou phone
+        UserAuth user = userAuthRepository.findByUsername(request.getUsername())
+                .or(() -> userAuthRepository.findByEmail(request.getUsername()))
+                .or(() -> userAuthRepository.findByPhone(request.getUsername()))
                 .orElse(null);
 
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {

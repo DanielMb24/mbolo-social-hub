@@ -15,10 +15,14 @@ public class UserAuth {
     private String id;
 
     @Indexed(unique = true)
-    private String phone;
+    private String username;
 
+    @Indexed(unique = true)
     private String email;
+    
+    private String phone;
     private String password;
+    private String fullName;
     private List<String> roles = List.of("ROLE_USER");
     private boolean isActive = true;
     private boolean isVerified = false;

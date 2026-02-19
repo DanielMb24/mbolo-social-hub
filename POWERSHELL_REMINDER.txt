@@ -1,0 +1,57 @@
+╔════════════════════════════════════════════════════════════╗
+║         RAPPEL IMPORTANT - POWERSHELL                      ║
+╚════════════════════════════════════════════════════════════╝
+
+Sous PowerShell, vous devez TOUJOURS utiliser .\ devant les fichiers .bat
+
+❌ INCORRECT:
+   install.bat
+   seed-test-data.bat
+   health-check.bat
+
+✅ CORRECT:
+   .\install.bat
+   .\seed-test-data.bat
+   .\health-check.bat
+
+═══════════════════════════════════════════════════════════
+
+COMMANDES PRINCIPALES:
+
+📦 Installation:
+   .\install.bat
+
+🚀 Démarrage:
+   .\start-all.bat
+
+🏥 Vérification:
+   .\health-check.bat
+
+🗄️ Base de données:
+   cd backend
+   .\init-databases.bat
+   .\seed-test-data.bat
+   .\verify-databases.bat
+
+═══════════════════════════════════════════════════════════
+
+ALTERNATIVES:
+
+1. Utiliser CMD au lieu de PowerShell:
+   cmd /c install.bat
+
+2. Double-clic dans l'explorateur:
+   Faites un double-clic sur RUN_ME_FIRST.bat
+
+3. Ouvrir CMD:
+   - Tapez "cmd" dans la barre d'adresse de l'explorateur
+   - Puis: install.bat (sans .\)
+
+═══════════════════════════════════════════════════════════
+
+📚 DOCUMENTATION:
+   - WINDOWS_QUICK_START.md (guide complet Windows)
+   - START_HERE.md (guide général)
+   - QUICK_START.md (démarrage rapide)
+
+═══════════════════════════════════════════════════════════
