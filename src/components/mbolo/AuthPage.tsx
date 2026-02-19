@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Eye, EyeOff, MessageCircle, ArrowRight, Users, Video, Shield } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
+import { authApi } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 
 interface AuthPageProps {
   onLogin: () => void;
@@ -16,13 +18,40 @@ const FEATURES = [
 const AuthPage = ({ onLogin }: AuthPageProps) => {
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [phone, setPhone] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullname, setFullname] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin();
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        // Login
+        const response = await authApi.login({ username, password });
+        localStorage.setItem('token', response.accessToken);
+        localStorage.setItem('refreshToken', response.refreshToken);
+        localStorage.setItem('userId', response.userId);
+        toast({ title: "Connexion réussie !", description: `Bienvenue ${username}` });
+        onLogin();
+      } else {
+        // Register
+        await authApi.register({ username, email, password });
+        toast({ title: "Inscription réussie !", description: "Vous pouvez maintenant vous connecter" });
+        setIsLogin(true);
+        setPassword("");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Erreur",
+        description: error.response?.data?.message || "Une erreur est survenue",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -73,24 +102,26 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
               <div>
-                <label className="text-sm font-medium text-foreground block mb-1.5">Nom complet</label>
+                <label className="text-sm font-medium text-foreground block mb-1.5">Email</label>
                 <input
-                  type="text"
-                  value={fullname}
-                  onChange={(e) => setFullname(e.target.value)}
-                  placeholder="John Doe"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="exemple@mbolo.com"
+                  required
                   className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all text-sm"
                 />
               </div>
             )}
 
             <div>
-              <label className="text-sm font-medium text-foreground block mb-1.5">Téléphone</label>
+              <label className="text-sm font-medium text-foreground block mb-1.5">Nom d'utilisateur</label>
               <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+241 XX XX XX XX"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="johndoe"
+                required
                 className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all text-sm"
               />
             </div>
@@ -103,6 +134,8 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
+                  required
+                  minLength={6}
                   className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all text-sm pr-12"
                 />
                 <button
@@ -123,10 +156,11 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
 
             <button
               type="submit"
-              className="w-full py-3.5 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-primary/25"
+              disabled={loading}
+              className="w-full py-3.5 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-primary/25 disabled:opacity-50"
             >
-              {isLogin ? "Se connecter" : "Créer mon compte"}
-              <ArrowRight className="w-4 h-4" />
+              {loading ? "Chargement..." : isLogin ? "Se connecter" : "Créer mon compte"}
+              {!loading && <ArrowRight className="w-4 h-4" />}
             </button>
           </form>
 
