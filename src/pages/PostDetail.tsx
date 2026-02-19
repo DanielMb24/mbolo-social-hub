@@ -319,9 +319,34 @@ const PostDetail = () => {
                   })}
                 </p>
               </div>
-              <button className="p-2 rounded-full hover:bg-muted transition-colors">
-                <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowMenu(!showMenu)}
+                  className="p-2 rounded-full hover:bg-muted transition-colors"
+                >
+                  <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
+                </button>
+                
+                {/* Menu dropdown */}
+                {showMenu && (
+                  <div className="absolute right-0 mt-1 w-48 bg-card border rounded-lg shadow-lg z-10">
+                    {post.authorId === userId && (
+                      <button
+                        onClick={handleDeletePost}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-muted transition-colors text-destructive"
+                      >
+                        🗑️ Supprimer
+                      </button>
+                    )}
+                    <button
+                      onClick={handleReportPost}
+                      className="w-full px-4 py-2 text-left text-sm hover:bg-muted transition-colors"
+                    >
+                      🚩 Signaler
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Contenu */}
