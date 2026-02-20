@@ -7,7 +7,7 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
-    port: 5173,
+    port: 8080,
     hmr: {
       overlay: false,
     },
@@ -20,5 +20,18 @@ export default defineConfig(({ mode }) => ({
   },
   define: {
     global: 'globalThis',
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // Code splitting par vendor
+        manualChunks: {
+          "react-vendor": ["react", "react-dom", "react-router-dom"],
+          "ui-vendor": ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-tooltip"],
+          "emoji": ["@emoji-mart/react", "@emoji-mart/data"],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 600,
   },
 }));

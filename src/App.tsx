@@ -3,15 +3,32 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import AuthPage from "@/components/mbolo/AuthPage";
-import Index from "./pages/Index";
-import PostDetail from "./pages/PostDetail";
-import CommentDetail from "./pages/CommentDetail";
-import ProfilePage from "@/components/mbolo/ProfilePage";
-import NotFound from "./pages/NotFound";
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
+import { Loader2 } from "lucide-react";
 
-const queryClient = new QueryClient();
+// Code splitting: lazy load des pages lourdes
+const AuthPage = lazy(() => import("@/components/mbolo/AuthPage"));
+const Index = lazy(() => import("./pages/Index"));
+const PostDetail = lazy(() => import("./pages/PostDetail"));
+const CommentDetail = lazy(() => import("./pages/CommentDetail"));
+const ProfilePage = lazy(() => import("@/components/mbolo/ProfilePage"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 2,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+const PageLoader = () => (
+  <div className="flex h-screen items-center justify-center bg-background">
+    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+  </div>
+);
 
 const App = () => {
   const [isAuth, setIsAuth] = useState(() => !!localStorage.getItem('token'));
@@ -22,21 +39,23 @@ const App = () => {
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <Routes>
-            <Route path="/" element={
-              isAuth ? <Index /> : <AuthPage onLogin={() => setIsAuth(true)} />
-            } />
-            <Route path="/post/:postId" element={
-              isAuth ? <PostDetail /> : <AuthPage onLogin={() => setIsAuth(true)} />
-            } />
-            <Route path="/comment/:commentId" element={
-              isAuth ? <CommentDetail /> : <AuthPage onLogin={() => setIsAuth(true)} />
-            } />
-            <Route path="/profile/:userId" element={
-              isAuth ? <ProfilePage /> : <AuthPage onLogin={() => setIsAuth(true)} />
-            } />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/" element={
+                isAuth ? <Index /> : <AuthPage onLogin={() => setIsAuth(true)} />
+              } />
+              <Route path="/post/:postId" element={
+                isAuth ? <PostDetail /> : <AuthPage onLogin={() => setIsAuth(true)} />
+              } />
+              <Route path="/comment/:commentId" element={
+                isAuth ? <CommentDetail /> : <AuthPage onLogin={() => setIsAuth(true)} />
+              } />
+              <Route path="/profile/:userId" element={
+                isAuth ? <ProfilePage /> : <AuthPage onLogin={() => setIsAuth(true)} />
+              } />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>
@@ -44,3 +63,4 @@ const App = () => {
 };
 
 export default App;
+

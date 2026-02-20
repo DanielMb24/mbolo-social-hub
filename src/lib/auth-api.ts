@@ -12,12 +12,12 @@ export interface ResetPasswordRequest {
 
 export const authApi = {
   forgotPassword: async (email: string): Promise<string> => {
-    const response = await api.post('/api/auth/forgot-password', { email });
+    const response = await api.post<{ message?: string }>('/api/auth/forgot-password', { email });
     return response.message || 'Un code de vérification a été envoyé à votre email.';
   },
 
   resetPassword: async (data: ResetPasswordRequest): Promise<string> => {
-    const response = await api.post('/api/auth/reset-password', data);
+    const response = await api.post<{ message?: string }>('/api/auth/reset-password', data);
     return response.message || 'Votre mot de passe a été réinitialisé avec succès.';
   },
 };

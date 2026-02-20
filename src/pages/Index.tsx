@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   MessageCircle, Users, Video, Home, User, Search, Bell,
-  Menu, X, LogOut
+  Menu, X, LogOut, WifiOff
 } from "lucide-react";
 import FeedPage from "@/components/mbolo/FeedPage";
 import ChatPage from "@/components/mbolo/ChatPage";
@@ -11,6 +11,7 @@ import PeoplePage from "@/components/mbolo/PeoplePage";
 import TrendingSidebar from "@/components/mbolo/TrendingSidebar";
 import AuthPage from "@/components/mbolo/AuthPage";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import { userApi } from "@/lib/api";
 
 type Tab = "feed" | "chat" | "videos" | "people" | "profile";
@@ -32,6 +33,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isMobile = useIsMobile();
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -146,6 +148,14 @@ const Index = () => {
 
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Offline banner */}
+        {!isOnline && (
+          <div className="flex items-center justify-center gap-2 bg-destructive text-destructive-foreground text-xs py-1.5 px-4">
+            <WifiOff className="w-3.5 h-3.5" />
+            <span>Pas de connexion internet – Mode hors-ligne</span>
+          </div>
+        )}
+
         {/* Top header */}
         <header className="flex items-center justify-between px-3 h-12 border-b bg-card shrink-0 z-40">
           <div className="flex items-center gap-3">
