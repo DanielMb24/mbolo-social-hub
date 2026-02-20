@@ -3,6 +3,11 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { postApi, userApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
+import StoriesBar from "./StoriesBar";
+import StoryCreator from "./StoryCreator";
+import { OptimizedImage } from "@/components/ui/optimized-image";
+import { useRateLimit } from "@/hooks/use-rate-limit";
+import type { Story } from "./StoriesBar";
 
 interface Post {
   id: string;
@@ -46,8 +51,16 @@ const FeedPage = () => {
   const [activeFilter, setActiveFilter] = useState<"all" | "trending">("all");
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
   const [showMenu, setShowMenu] = useState<string | null>(null);
+  const [showStoryCreator, setShowStoryCreator] = useState(false);
+  const [newStory, setNewStory] = useState<Story | null>(null);
   const userId = localStorage.getItem('userId') || '';
   const userInitials = userId.substring(0, 2).toUpperCase();
+
+  // Rate limits
+  const postRateLimit = useRateLimit({ maxCalls: 5, windowMs: 3600000, message: "Max 5 publications par heure." });
+  const likeRateLimit = useRateLimit({ maxCalls: 100, windowMs: 60000, message: "Vous aimez trop vite !" });
+  const commentRateLimit = useRateLimit({ maxCalls: 20, windowMs: 60000, message: "Max 20 commentaires par minute." });
+
 
   useEffect(() => {
     loadPosts();
@@ -99,6 +112,7 @@ const FeedPage = () => {
 
   const handleCreatePost = async () => {
     if (!newPost.trim() || posting) return;
+    if (!postRateLimit.check()) return;
     
     setPosting(true);
     try {
@@ -114,6 +128,7 @@ const FeedPage = () => {
   };
 
   const toggleLike = async (id: string) => {
+    if (!likeRateLimit.check()) return;
     try {
       const post = posts.find(p => p.id === id);
       if (!post) return;
@@ -149,6 +164,7 @@ const FeedPage = () => {
 
   const handleComment = async (postId: string) => {
     if (!commentText.trim()) return;
+    if (!commentRateLimit.check()) return;
 
     try {
       await postApi.addComment(postId, commentText);
@@ -240,7 +256,30 @@ const FeedPage = () => {
   return (
     <div className="flex justify-center">
       <div className="w-full max-w-2xl">
-        {/* Filtres */}
+        {/* ── Stories ── */}
+        <StoriesBar
+          currentUserId={userId || "me"}
+          currentUsername={userInitials || "Moi"}
+          currentUserInitials={userInitials || "M"}
+          onAddStoryClick={() => setShowStoryCreator(true)}
+          externalStory={newStory}
+        />
+
+        {/* Story Creator Modal */}
+        {showStoryCreator && (
+          <StoryCreator
+            onClose={() => setShowStoryCreator(false)}
+            onStoryCreated={(story) => {
+              setNewStory(story);
+              setShowStoryCreator(false);
+            }}
+            currentUserId={userId || "me"}
+            currentUsername={userInitials || "Moi"}
+            currentUserInitials={userInitials || "M"}
+          />
+        )}
+
+        {/* ── Filtres ── */}
         <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b p-2 flex gap-2">
           <button
             onClick={() => setActiveFilter("all")}

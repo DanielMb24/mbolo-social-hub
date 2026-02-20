@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   MessageCircle, Users, Video, Home, User, Search, Bell,
-  Menu, X, LogOut
+  Menu, X, LogOut, WifiOff
 } from "lucide-react";
 import FeedPage from "@/components/mbolo/FeedPage";
 import ChatPage from "@/components/mbolo/ChatPage";
@@ -10,7 +10,10 @@ import ProfilePage from "@/components/mbolo/ProfilePage";
 import PeoplePage from "@/components/mbolo/PeoplePage";
 import TrendingSidebar from "@/components/mbolo/TrendingSidebar";
 import AuthPage from "@/components/mbolo/AuthPage";
+import NotificationPanel from "@/components/mbolo/NotificationPanel";
+import GlobalSearch from "@/components/mbolo/GlobalSearch";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import { userApi } from "@/lib/api";
 
 type Tab = "feed" | "chat" | "videos" | "people" | "profile";
@@ -31,7 +34,11 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState<Tab>("feed");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [unreadCount] = useState(3); // Demo: 3 unread
   const isMobile = useIsMobile();
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -146,6 +153,14 @@ const Index = () => {
 
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Offline banner */}
+        {!isOnline && (
+          <div className="flex items-center justify-center gap-2 bg-destructive text-destructive-foreground text-xs py-1.5 px-4">
+            <WifiOff className="w-3.5 h-3.5" />
+            <span>Pas de connexion internet – Mode hors-ligne</span>
+          </div>
+        )}
+
         {/* Top header */}
         <header className="flex items-center justify-between px-3 h-12 border-b bg-card shrink-0 z-40">
           <div className="flex items-center gap-3">
@@ -190,14 +205,29 @@ const Index = () => {
             </div>
           )}
 
-          <div className="flex items-center gap-1">
-            <button className="p-2 rounded-lg hover:bg-muted transition-colors">
+          <div className="flex items-center gap-1 relative">
+            <button
+              onClick={() => { setShowSearch(true); setShowNotifications(false); }}
+              className="p-2 rounded-lg hover:bg-muted transition-colors"
+            >
               <Search className="w-5 h-5 text-muted-foreground" />
             </button>
-            <button className="p-2 rounded-lg hover:bg-muted transition-colors relative">
-              <Bell className="w-5 h-5 text-muted-foreground" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => { setShowNotifications(n => !n); }}
+                className="p-2 rounded-lg hover:bg-muted transition-colors relative"
+              >
+                <Bell className="w-5 h-5 text-muted-foreground" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 min-w-[16px] h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center px-0.5">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+              {showNotifications && (
+                <NotificationPanel onClose={() => setShowNotifications(false)} />
+              )}
+            </div>
           </div>
         </header>
 
@@ -219,6 +249,11 @@ const Index = () => {
           )}
         </main>
       </div>
+
+      {/* Global Search Overlay */}
+      {showSearch && (
+        <GlobalSearch onClose={() => setShowSearch(false)} />
+      )}
 
       {/* Mobile menu overlay */}
       {isMobile && mobileMenuOpen && (

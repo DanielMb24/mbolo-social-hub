@@ -164,7 +164,8 @@ const ChatPage = () => {
     loadMessages();
 
     // Connecter WebSocket
-    wsService.connect((data: { type?: string; data?: unknown; userId?: string }) => {
+    wsService.connect((raw: unknown) => {
+      const data = raw as { type?: string; data?: unknown; userId?: string; messageId?: string; userName?: string; id?: string; senderId?: string; conversationId?: string; content?: string; timestamp?: string; read?: boolean; seenBy?: string[]; reactions?: unknown[]; senderName?: string; replyTo?: unknown; mediaUrl?: string; mediaType?: string; starred?: boolean };
       if (data.type === 'SEEN') {
         setMessages(prev => prev.map(msg => {
           if (data.data && Array.isArray(data.data) && data.data.includes(msg.id)) {
@@ -175,21 +176,36 @@ const ChatPage = () => {
       } else if (data.type === 'DELETED') {
         setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
       } else if (data.type === 'TYPING') {
-        // Gérer l'indicateur de frappe
-        const { userId, userName } = data;
-        setTypingUsers(prev => ({ ...prev, [userId]: userName }));
+        const typingUserId = data.userId || '';
+        const typingUserName = data.userName || 'Utilisateur';
+        setTypingUsers(prev => ({ ...prev, [typingUserId]: typingUserName }));
         setTimeout(() => {
           setTypingUsers(prev => {
             const newState = { ...prev };
-            delete newState[userId];
+            delete newState[typingUserId];
             return newState;
           });
         }, 3000);
-      } else {
-        setMessages(prev => [...prev, data]);
-        const userId = localStorage.getItem('userId');
-        if (data.senderId !== userId) {
-          chatApi.markMessageAsSeen(data.id).catch(err => 
+      } else if (data.id && data.senderId && data.content) {
+        const msg: Message = {
+          id: data.id,
+          conversationId: data.conversationId || selectedConvo || '',
+          senderId: data.senderId,
+          content: data.content,
+          type: (data as { type?: string }).type as Message['type'] || 'TEXT',
+          createdAt: (data as { createdAt?: string }).createdAt || new Date().toISOString(),
+          deleted: false,
+          seenBy: data.seenBy || [],
+          reactions: (data.reactions || []) as Message['reactions'],
+          senderName: data.senderName,
+          replyTo: data.replyTo as Message['replyTo'],
+          mediaUrl: data.mediaUrl,
+          starred: data.starred,
+        };
+        setMessages(prev => [...prev, msg]);
+        const currentUserId = localStorage.getItem('userId');
+        if (msg.senderId !== currentUserId) {
+          chatApi.markMessageAsSeen(msg.id).catch(err => 
             console.error("Erreur marquage message vu:", err)
           );
         }
@@ -476,11 +492,14 @@ const ChatPage = () => {
     // Recharger les conversations
     const loadConversations = async () => {
       try {
-        const data: unknown = await chatApi.getConversations();
-        if (Array.isArray(data)) {
-          setConversations(data);
-        } else if (data && typeof data === 'object' && Array.isArray(data.data)) {
-          setConversations(data.data);
+        const result: unknown = await chatApi.getConversations();
+        if (Array.isArray(result)) {
+          setConversations(result as Conversation[]);
+        } else if (result && typeof result === 'object') {
+          const obj = result as { data?: unknown };
+          if (Array.isArray(obj.data)) {
+            setConversations(obj.data as Conversation[]);
+          }
         }
       } catch (error) {
         console.error("Erreur rechargement conversations:", error);
