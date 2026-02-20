@@ -7,6 +7,7 @@ import AuthPage from "@/components/mbolo/AuthPage";
 import Index from "./pages/Index";
 import PostDetail from "./pages/PostDetail";
 import CommentDetail from "./pages/CommentDetail";
+import ProfilePage from "@/components/mbolo/ProfilePage";
 import NotFound from "./pages/NotFound";
 import { useState } from "react";
 
@@ -30,6 +31,9 @@ const App = () => {
             } />
             <Route path="/comment/:commentId" element={
               isAuth ? <CommentDetail /> : <AuthPage onLogin={() => setIsAuth(true)} />
+            } />
+            <Route path="/profile/:userId" element={
+              isAuth ? <ProfilePage /> : <AuthPage onLogin={() => setIsAuth(true)} />
             } />
             <Route path="*" element={<NotFound />} />
           </Routes>

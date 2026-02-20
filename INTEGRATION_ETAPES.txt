@@ -1,0 +1,216 @@
+========================================
+GUIDE D'INTEGRATION - ETAPES SIMPLES
+========================================
+
+ETAPE 1: INSTALLER LES DEPENDANCES
+========================================
+
+Executer:
+  install-chat-deps.bat
+
+Ou manuellement:
+  npm install sockjs-client @stomp/stompjs
+  npm install --save-dev @types/sockjs-client
+
+========================================
+ETAPE 2: CONFIGURER L'EMAIL
+========================================
+
+1. Creer le fichier: backend/auth-service/.env
+
+2. Ajouter:
+   MAIL_USERNAME=votre-email@gmail.com
+   MAIL_PASSWORD=votre-mot-de-passe-application
+
+3. Pour Gmail:
+   - Aller sur https://myaccount.google.com/apppasswords
+   - Creer un mot de passe application
+   - Copier le mot de passe (16 caracteres)
+
+========================================
+ETAPE 3: INTEGRER FORGOT PASSWORD
+========================================
+
+Dans src/components/mbolo/AuthPage.tsx:
+
+1. Ajouter l'import:
+   import { ForgotPasswordDialog } from "./ForgotPasswordDialog";
+   import { useState } from "react";
+
+2. Ajouter l'etat:
+   const [showForgotPassword, setShowForgotPassword] = useState(false);
+
+3. Ajouter le bouton (dans le formulaire de connexion):
+   <button
+     type="button"
+     onClick={() => setShowForgotPassword(true)}
+     className="text-sm text-primary hover:underline"
+   >
+     Mot de passe oublie ?
+   </button>
+
+4. Ajouter le composant (avant la fermeture du return):
+   <ForgotPasswordDialog
+     open={showForgotPassword}
+     onOpenChange={setShowForgotPassword}
+   />
+
+========================================
+ETAPE 4: INTEGRER LA MESSAGERIE REELLE
+========================================
+
+Dans src/components/mbolo/ChatPage.tsx:
+
+1. Ajouter les imports:
+   import { chatApi } from "@/lib/chat-api";
+   import { wsService } from "@/lib/websocket";
+   import { useEffect, useState } from "react";
+   import { toast } from "sonner";
+
+2. Remplacer MOCK_CONVERSATIONS par:
+   const [conversations, setConversations] = useState([]);
+   const [loading, setLoading] = useState(true);
+
+3. Charger les conversations:
+   useEffect(() => {
+     const load = async () => {
+       try {
+         const data = await chatApi.getConversations();
+         setConversations(data);
+       } catch (error) {
+         toast.error("Erreur chargement");
+       } finally {
+         setLoading(false);
+       }
+     };
+     load();
+   }, []);
+
+4. Charger les messages:
+   useEffect(() => {
+     if (!selectedConvo) return;
+     const load = async () => {
+       const data = await chatApi.getMessages(selectedConvo);
+       setMessages(data.content);
+     };
+     load();
+   }, [selectedConvo]);
+
+5. Connecter WebSocket:
+   useEffect(() => {
+     if (!selectedConvo) return;
+     wsService.connect((msg) => {
+       setMessages(prev => [...prev, msg]);
+     }, selectedConvo);
+     return () => wsService.disconnect();
+   }, [selectedConvo]);
+
+========================================
+ETAPE 5: DEMARRER L'APPLICATION
+========================================
+
+1. Demarrer backend:
+   cd backend
+   docker-compose up -d
+
+2. Attendre 30 secondes
+
+3. Demarrer frontend:
+   npm run dev
+
+4. Ouvrir: http://localhost:5173
+
+========================================
+ETAPE 6: TESTER
+========================================
+
+Test Email:
+  cd backend
+  test-email-config.bat
+
+Test Messagerie:
+  1. Se connecter
+  2. Aller dans Messages
+  3. Creer une conversation
+  4. Envoyer un message
+
+Test Forgot Password:
+  1. Cliquer "Mot de passe oublie"
+  2. Entrer email
+  3. Verifier email recu
+  4. Entrer code OTP
+  5. Nouveau mot de passe
+
+========================================
+VERIFICATION
+========================================
+
+Services actifs:
+  docker ps
+
+Logs:
+  docker logs mbolo-auth-service
+  docker logs mbolo-chat-service
+
+Health check:
+  curl http://localhost:8081/actuator/health
+  curl http://localhost:8083/actuator/health
+
+========================================
+PROBLEMES COURANTS
+========================================
+
+Email non envoye:
+  - Verifier .env existe
+  - Verifier mot de passe application Gmail
+  - Voir logs: docker logs mbolo-auth-service
+
+WebSocket ne connecte pas:
+  - Verifier chat-service demarre
+  - Voir logs: docker logs mbolo-chat-service
+  - Verifier URL dans websocket.ts
+
+Port deja utilise:
+  - Arreter: docker-compose down
+  - Redemarrer: docker-compose up -d
+
+========================================
+FICHIERS IMPORTANTS
+========================================
+
+Backend:
+  backend/auth-service/.env
+  backend/docker-compose.yml
+
+Frontend:
+  src/lib/auth-api.ts
+  src/lib/chat-api.ts
+  src/lib/websocket.ts
+  src/components/mbolo/ForgotPasswordDialog.tsx
+  src/components/mbolo/AuthPage.tsx
+  src/components/mbolo/ChatPage.tsx
+
+Documentation:
+  AMELIORATIONS_MESSAGERIE_ET_AUTH.md
+  DEMARRAGE_MESSAGERIE.md
+  backend/EMAIL_CONFIGURATION.md
+
+Scripts:
+  install-chat-deps.bat
+  start-with-chat.bat
+  backend/test-email-config.bat
+
+========================================
+AIDE
+========================================
+
+Documentation complete:
+  AMELIORATIONS_MESSAGERIE_ET_AUTH.md
+
+Demarrage rapide:
+  DEMARRAGE_MESSAGERIE.md
+
+Configuration email:
+  backend/EMAIL_CONFIGURATION.md
+
+Tout est pret pour l'integration !

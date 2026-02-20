@@ -15,5 +15,9 @@ public class Conversation {
     private List<String> participants = new ArrayList<>();
     private String type; // PRIVATE, GROUP
     private String groupName;
+    private String groupAvatar;
+    private String lastMessage;
+    private Instant lastMessageTime;
+    private int unreadCount = 0;
     private Instant createdAt = Instant.now();
 }

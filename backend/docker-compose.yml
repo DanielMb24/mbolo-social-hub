@@ -106,7 +106,14 @@ services:
       - "8081:8081"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
+      - MAIL_USERNAME=${MAIL_USERNAME:-your-email@gmail.com}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-your-app-password}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL:-http://localhost:8081/api/auth/google/callback}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
     depends_on:
+      - mongo-auth
       - redis
     networks:
       - mb-network
@@ -130,7 +137,10 @@ services:
       - "8083:8083"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
+    volumes:
+      - chat-uploads:/tmp/uploads/chat
     depends_on:
+      - mongo-chat
       - redis
     networks:
       - mb-network
@@ -179,3 +189,4 @@ volumes:
   mongo-video-data:
   mongo-moderation-data:
   minio-data:
+  chat-uploads:

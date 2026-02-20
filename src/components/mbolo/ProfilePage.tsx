@@ -1,15 +1,21 @@
 import { Settings, LogOut, Camera, MapPin, Calendar, Edit2, Grid3x3, Video, Bookmark, Heart, ExternalLink } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
 import { userApi, postApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 
 interface ProfilePageProps {
-  onLogout: () => void;
+  onLogout?: () => void;
 }
 
 type ProfileTab = "posts" | "videos" | "saved";
 
 const ProfilePage = ({ onLogout }: ProfilePageProps) => {
+  const { userId: urlUserId } = useParams<{ userId: string }>();
+  const currentUserId = localStorage.getItem('userId') || '';
+  const userId = urlUserId || currentUserId; // Utiliser l'ID de l'URL ou celui connecté
+  const isOwnProfile = userId === currentUserId; // Vérifier si c'est son propre profil
+  
   const [activeTab, setActiveTab] = useState<ProfileTab>("posts");
   const [profile, setProfile] = useState<any>(null);
   const [posts, setPosts] = useState<any[]>([]);
@@ -22,12 +28,11 @@ const ProfilePage = ({ onLogout }: ProfilePageProps) => {
     bio: '',
     location: ''
   });
-  const userId = localStorage.getItem('userId') || '';
 
   useEffect(() => {
     loadProfile();
     loadUserPosts();
-  }, []);
+  }, [userId]); // Recharger quand l'userId change
 
   const loadProfile = async () => {
     try {
@@ -109,9 +114,11 @@ const ProfilePage = ({ onLogout }: ProfilePageProps) => {
       <div className="w-full max-w-2xl pb-8">
         {/* Cover */}
         <div className="h-40 lg:h-56 bg-gradient-to-r from-primary via-primary/80 to-secondary relative">
-          <button className="absolute top-3 right-3 p-2 rounded-full bg-foreground/20 text-primary-foreground hover:bg-foreground/30 transition-colors backdrop-blur-sm">
-            <Camera className="w-4 h-4" />
-          </button>
+          {isOwnProfile && (
+            <button className="absolute top-3 right-3 p-2 rounded-full bg-foreground/20 text-primary-foreground hover:bg-foreground/30 transition-colors backdrop-blur-sm">
+              <Camera className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Profile info */}
@@ -121,9 +128,11 @@ const ProfilePage = ({ onLogout }: ProfilePageProps) => {
               <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-background bg-primary flex items-center justify-center text-primary-foreground text-3xl sm:text-4xl font-bold shadow-lg">
                 {userInitials}
               </div>
-              <button className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground shadow-md hover:opacity-90 transition-opacity">
-                <Camera className="w-4 h-4" />
-              </button>
+              {isOwnProfile && (
+                <button className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground shadow-md hover:opacity-90 transition-opacity">
+                  <Camera className="w-4 h-4" />
+                </button>
+              )}
             </div>
             <div className="flex-1 pb-2">
               <div className="flex items-start justify-between">
@@ -132,16 +141,20 @@ const ProfilePage = ({ onLogout }: ProfilePageProps) => {
                   <p className="text-sm text-muted-foreground">@{username}</p>
                 </div>
                 <div className="flex gap-2">
-                  <button 
-                    onClick={() => setEditing(!editing)}
-                    className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-2"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    {editing ? 'Annuler' : 'Modifier'}
-                  </button>
-                  <button className="p-2 rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors">
-                    <Settings className="w-4 h-4" />
-                  </button>
+                  {isOwnProfile && (
+                    <>
+                      <button 
+                        onClick={() => setEditing(!editing)}
+                        className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-2"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        {editing ? 'Annuler' : 'Modifier'}
+                      </button>
+                      <button className="p-2 rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors">
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

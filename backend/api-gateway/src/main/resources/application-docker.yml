@@ -25,7 +25,7 @@ spring:
         - id: chat-service
           uri: http://chat-service:8083
           predicates:
-            - Path=/api/chat/**,/ws-chat/**
+            - Path=/api/chat/**,/ws-chat/**,/uploads/chat/**
         - id: post-service
           uri: http://post-service:8084
           predicates:

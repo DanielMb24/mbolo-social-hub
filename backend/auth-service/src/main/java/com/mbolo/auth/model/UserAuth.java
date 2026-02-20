@@ -23,8 +23,15 @@ public class UserAuth {
     private String phone;
     private String password;
     private String fullName;
+    private String profilePicture;
+    
+    // Google OAuth
+    private String googleId;
+    private boolean emailVerified = false;
+    
     private List<String> roles = List.of("ROLE_USER");
     private boolean isActive = true;
     private boolean isVerified = false;
     private Instant createdAt = Instant.now();
+    private Instant lastLogin;
 }
