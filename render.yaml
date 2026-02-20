@@ -1,0 +1,217 @@
+# ==========================================
+# Configuration Render.com - MBolo Social Hub
+# ==========================================
+
+services:
+  # ==================== FRONTEND ====================
+  - type: web
+    name: mbolo-frontend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_API_URL
+        value: https://mbolo-gateway.onrender.com
+      - key: VITE_WS_URL
+        value: wss://mbolo-gateway.onrender.com
+
+  # ==================== API GATEWAY ====================
+  - type: web
+    name: mbolo-gateway
+    env: docker
+    dockerfilePath: ./backend/api-gateway/Dockerfile
+    dockerContext: ./backend/api-gateway
+    region: oregon
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: docker
+      - key: REDIS_HOST
+        fromService:
+          name: mbolo-redis
+          type: redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          name: mbolo-redis
+          type: redis
+          property: port
+
+  # ==================== AUTH SERVICE ====================
+  - type: web
+    name: mbolo-auth
+    env: docker
+    dockerfilePath: ./backend/auth-service/Dockerfile
+    dockerContext: ./backend/auth-service
+    region: oregon
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: docker
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mbolo-mongo-auth
+          property: connectionString
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALLBACK_URL
+        value: https://mbolo-auth.onrender.com/api/auth/google/callback
+      - key: FRONTEND_URL
+        value: https://mbolo-frontend.onrender.com
+      - key: REDIS_HOST
+        fromService:
+          name: mbolo-redis
+          type: redis
+          property: host
+
+  # ==================== USER SERVICE ====================
+  - type: web
+    name: mbolo-user
+    env: docker
+    dockerfilePath: ./backend/user-service/Dockerfile
+    dockerContext: ./backend/user-service
+    region: oregon
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: docker
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mbolo-mongo-user
+          property: connectionString
+      - key: MINIO_ENDPOINT
+        value: https://mbolo-minio.onrender.com
+      - key: MINIO_ACCESS_KEY
+        sync: false
+      - key: MINIO_SECRET_KEY
+        sync: false
+
+  # ==================== CHAT SERVICE ====================
+  - type: web
+    name: mbolo-chat
+    env: docker
+    dockerfilePath: ./backend/chat-service/Dockerfile
+    dockerContext: ./backend/chat-service
+    region: oregon
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: docker
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mbolo-mongo-chat
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          name: mbolo-redis
+          type: redis
+          property: host
+
+  # ==================== POST SERVICE ====================
+  - type: web
+    name: mbolo-post
+    env: docker
+    dockerfilePath: ./backend/post-service/Dockerfile
+    dockerContext: ./backend/post-service
+    region: oregon
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: docker
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mbolo-mongo-post
+          property: connectionString
+
+  # ==================== VIDEO SERVICE ====================
+  - type: web
+    name: mbolo-video
+    env: docker
+    dockerfilePath: ./backend/video-service/Dockerfile
+    dockerContext: ./backend/video-service
+    region: oregon
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: docker
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mbolo-mongo-video
+          property: connectionString
+      - key: MINIO_ENDPOINT
+        value: https://mbolo-minio.onrender.com
+
+  # ==================== MODERATION SERVICE ====================
+  - type: web
+    name: mbolo-moderation
+    env: docker
+    dockerfilePath: ./backend/moderation-service/Dockerfile
+    dockerContext: ./backend/moderation-service
+    region: oregon
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: docker
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mbolo-mongo-moderation
+          property: connectionString
+
+# ==================== DATABASES ====================
+databases:
+  - name: mbolo-mongo-auth
+    databaseName: mbolo_auth
+    user: mbolo_auth_user
+    region: oregon
+    plan: free
+
+  - name: mbolo-mongo-user
+    databaseName: mbolo_user
+    user: mbolo_user_user
+    region: oregon
+    plan: free
+
+  - name: mbolo-mongo-chat
+    databaseName: mbolo_chat
+    user: mbolo_chat_user
+    region: oregon
+    plan: free
+
+  - name: mbolo-mongo-post
+    databaseName: mbolo_post
+    user: mbolo_post_user
+    region: oregon
+    plan: free
+
+  - name: mbolo-mongo-video
+    databaseName: mbolo_video
+    user: mbolo_video_user
+    region: oregon
+    plan: free
+
+  - name: mbolo-mongo-moderation
+    databaseName: mbolo_moderation
+    user: mbolo_moderation_user
+    region: oregon
+    plan: free
+
+  - name: mbolo-redis
+    plan: free
+    region: oregon
