@@ -4,8 +4,10 @@ import { useNavigate } from "react-router-dom";
 import { postApi, userApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import StoriesBar from "./StoriesBar";
+import StoryCreator from "./StoryCreator";
 import { OptimizedImage } from "@/components/ui/optimized-image";
 import { useRateLimit } from "@/hooks/use-rate-limit";
+import type { Story } from "./StoriesBar";
 
 interface Post {
   id: string;
@@ -49,6 +51,8 @@ const FeedPage = () => {
   const [activeFilter, setActiveFilter] = useState<"all" | "trending">("all");
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
   const [showMenu, setShowMenu] = useState<string | null>(null);
+  const [showStoryCreator, setShowStoryCreator] = useState(false);
+  const [newStory, setNewStory] = useState<Story | null>(null);
   const userId = localStorage.getItem('userId') || '';
   const userInitials = userId.substring(0, 2).toUpperCase();
 
@@ -253,7 +257,27 @@ const FeedPage = () => {
     <div className="flex justify-center">
       <div className="w-full max-w-2xl">
         {/* ── Stories ── */}
-        <StoriesBar />
+        <StoriesBar
+          currentUserId={userId || "me"}
+          currentUsername={userInitials || "Moi"}
+          currentUserInitials={userInitials || "M"}
+          onAddStoryClick={() => setShowStoryCreator(true)}
+          externalStory={newStory}
+        />
+
+        {/* Story Creator Modal */}
+        {showStoryCreator && (
+          <StoryCreator
+            onClose={() => setShowStoryCreator(false)}
+            onStoryCreated={(story) => {
+              setNewStory(story);
+              setShowStoryCreator(false);
+            }}
+            currentUserId={userId || "me"}
+            currentUsername={userInitials || "Moi"}
+            currentUserInitials={userInitials || "M"}
+          />
+        )}
 
         {/* ── Filtres ── */}
         <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b p-2 flex gap-2">

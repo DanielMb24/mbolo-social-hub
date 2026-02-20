@@ -355,15 +355,44 @@ const StoryViewer = ({ groups, initialGroupIndex, onClose, onStorySeen }: StoryV
 
 // ─────────────────────────── STORIES BAR ─────────────────────────────────────
 
-const StoriesBar = () => {
+interface StoriesBarProps {
+  currentUserId?: string;
+  currentUsername?: string;
+  currentUserInitials?: string;
+  onAddStoryClick?: () => void;
+  externalStory?: Story | null;
+}
+
+const StoriesBar = ({
+  currentUserId = "me",
+  currentUsername = "Moi",
+  currentUserInitials = "M",
+  onAddStoryClick,
+  externalStory,
+}: StoriesBarProps) => {
   const [groups, setGroups] = useState<StoryGroup[]>(DEMO_STORY_GROUPS);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerGroupIndex, setViewerGroupIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Inject external story created via StoryCreator
+  useEffect(() => {
+    if (!externalStory) return;
+    setGroups(prev =>
+      prev.map(g =>
+        g.userId === "me"
+          ? { ...g, stories: [externalStory, ...g.stories], allSeen: false }
+          : g
+      )
+    );
+  }, [externalStory]);
+
   const openViewer = (index: number) => {
-    // Skip "Moi" (index 0) if no stories
-    if (index === 0 && groups[0].stories.length === 0) return;
+    const group = groups[index];
+    if (group.userId === "me" && group.stories.length === 0) {
+      onAddStoryClick?.();
+      return;
+    }
     setViewerGroupIndex(index);
     setViewerOpen(true);
   };
@@ -378,7 +407,11 @@ const StoriesBar = () => {
     );
   };
 
-  const nonEmptyGroups = groups.filter((g, i) => i === 0 || g.stories.length > 0);
+  // Always show "me" slot, plus non-empty groups
+  const displayGroups = [
+    groups[0],
+    ...groups.slice(1).filter(g => g.stories.length > 0),
+  ];
 
   return (
     <>
@@ -388,10 +421,11 @@ const StoriesBar = () => {
           className="flex gap-4 px-4 py-3 overflow-x-auto scrollbar-hide"
           style={{ scrollbarWidth: "none" }}
         >
-          {nonEmptyGroups.map((group, i) => {
+          {displayGroups.map((group) => {
             const realIndex = groups.indexOf(group);
             const isMe = group.userId === "me";
-            const ringColor = group.allSeen
+            const hasNoStories = group.stories.length === 0;
+            const ringColor = group.allSeen || hasNoStories
               ? "ring-muted"
               : "ring-[hsl(var(--primary))]";
 
@@ -434,8 +468,8 @@ const StoriesBar = () => {
 
       {viewerOpen && (
         <StoryViewer
-          groups={nonEmptyGroups.filter(g => g.stories.length > 0)}
-          initialGroupIndex={Math.max(0, viewerGroupIndex - 1)}
+          groups={displayGroups.filter(g => g.stories.length > 0)}
+          initialGroupIndex={Math.max(0, displayGroups.filter(g => g.stories.length > 0).findIndex(g => g.userId === displayGroups[viewerGroupIndex]?.userId))}
           onClose={() => setViewerOpen(false)}
           onStorySeen={handleStorySeen}
         />
