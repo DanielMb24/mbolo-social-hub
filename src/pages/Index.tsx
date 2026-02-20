@@ -10,6 +10,8 @@ import ProfilePage from "@/components/mbolo/ProfilePage";
 import PeoplePage from "@/components/mbolo/PeoplePage";
 import TrendingSidebar from "@/components/mbolo/TrendingSidebar";
 import AuthPage from "@/components/mbolo/AuthPage";
+import NotificationPanel from "@/components/mbolo/NotificationPanel";
+import GlobalSearch from "@/components/mbolo/GlobalSearch";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { userApi } from "@/lib/api";
@@ -32,6 +34,9 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState<Tab>("feed");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [unreadCount] = useState(3); // Demo: 3 unread
   const isMobile = useIsMobile();
   const isOnline = useOnlineStatus();
 
@@ -200,14 +205,29 @@ const Index = () => {
             </div>
           )}
 
-          <div className="flex items-center gap-1">
-            <button className="p-2 rounded-lg hover:bg-muted transition-colors">
+          <div className="flex items-center gap-1 relative">
+            <button
+              onClick={() => { setShowSearch(true); setShowNotifications(false); }}
+              className="p-2 rounded-lg hover:bg-muted transition-colors"
+            >
               <Search className="w-5 h-5 text-muted-foreground" />
             </button>
-            <button className="p-2 rounded-lg hover:bg-muted transition-colors relative">
-              <Bell className="w-5 h-5 text-muted-foreground" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => { setShowNotifications(n => !n); }}
+                className="p-2 rounded-lg hover:bg-muted transition-colors relative"
+              >
+                <Bell className="w-5 h-5 text-muted-foreground" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 min-w-[16px] h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center px-0.5">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+              {showNotifications && (
+                <NotificationPanel onClose={() => setShowNotifications(false)} />
+              )}
+            </div>
           </div>
         </header>
 
@@ -229,6 +249,11 @@ const Index = () => {
           )}
         </main>
       </div>
+
+      {/* Global Search Overlay */}
+      {showSearch && (
+        <GlobalSearch onClose={() => setShowSearch(false)} />
+      )}
 
       {/* Mobile menu overlay */}
       {isMobile && mobileMenuOpen && (
