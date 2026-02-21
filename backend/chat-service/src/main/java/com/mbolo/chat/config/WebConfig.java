@@ -10,21 +10,12 @@ public class WebConfig implements WebMvcConfigurer {
     
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Servir les fichiers du dossier /tmp/uploads/chat via /uploads/chat/**
         registry.addResourceHandler("/uploads/chat/**")
                 .addResourceLocations("file:/tmp/uploads/chat/")
-                .setCachePeriod(3600) // Cache de 1 heure
+                .setCachePeriod(3600)
                 .resourceChain(true);
     }
     
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        // CORS géré par l'API Gateway - pas de configuration ici pour éviter les doublons
-        // Seulement pour les fichiers statiques uploadés
-        registry.addMapping("/uploads/**")
-                .allowedOrigins("http://localhost:5173", "http://localhost:3000", "http://localhost:8080")
-                .allowedMethods("GET", "HEAD")
-                .allowedHeaders("*")
-                .maxAge(3600);
-    }
+    // CORS entièrement géré par l'API Gateway - aucune config CORS ici
+    // pour éviter le doublon Access-Control-Allow-Origin
 }
