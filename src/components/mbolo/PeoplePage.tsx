@@ -1,4 +1,4 @@
-import { Users, UserPlus, UserMinus, Search, TrendingUp, Loader2 } from "lucide-react";
+import { Users, UserPlus, UserMinus, Search, TrendingUp, Loader2, Sparkles, BadgeCheck, Star, Crown, Filter } from "lucide-react";
 import { useState, useEffect } from "react";
 import { userApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
@@ -11,7 +11,17 @@ interface User {
   avatarUrl?: string;
   followersCount: number;
   followingCount: number;
+  verified?: boolean;
+  category?: string;
+  badge?: 'star' | 'crown' | 'verified';
 }
+
+const CATEGORIES = [
+  { id: 'all', label: 'Tous', icon: Users },
+  { id: 'verified', label: 'Vérifiés', icon: BadgeCheck },
+  { id: 'popular', label: 'Populaires', icon: TrendingUp },
+  { id: 'creators', label: 'Créateurs', icon: Sparkles },
+];
 
 const PeoplePage = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -19,17 +29,99 @@ const PeoplePage = () => {
   const [loading, setLoading] = useState(true);
   const [followingUsers, setFollowingUsers] = useState<Set<string>>(new Set());
   const [loadingFollow, setLoadingFollow] = useState<Set<string>>(new Set());
+  const [activeCategory, setActiveCategory] = useState('all');
   const currentUserId = localStorage.getItem('userId') || '';
 
-  useEffect(() => {
-    loadSuggestions();
-  }, []);
-
   const loadSuggestions = async () => {
+    const demoUsers: User[] = [
+      {
+        id: 'demo-1',
+        username: 'flavy_m',
+        fullname: 'Flavy Moukagny',
+        bio: 'Artiste & créatrice de contenu 🎨 | Libreville 🇬🇦',
+        followersCount: 1250,
+        followingCount: 340,
+        verified: true,
+        category: 'creators',
+        badge: 'verified'
+      },
+      {
+        id: 'demo-2',
+        username: 'roro_ndg',
+        fullname: 'Roro Ndg',
+        bio: 'Photographe professionnel 📸 | Capturing Gabon',
+        followersCount: 890,
+        followingCount: 210,
+        verified: true,
+        category: 'creators',
+        badge: 'verified'
+      },
+      {
+        id: 'demo-3',
+        username: 'oriana_k',
+        fullname: 'Oriana Krm',
+        bio: 'Influenceuse lifestyle & mode ✨ | #GabonStyle',
+        followersCount: 2100,
+        followingCount: 450,
+        verified: true,
+        category: 'popular',
+        badge: 'star'
+      },
+      {
+        id: 'demo-4',
+        username: 'chef_lbv',
+        fullname: 'Chef Libreville',
+        bio: 'Cuisine gabonaise authentique 🍲 | Recettes traditionnelles',
+        followersCount: 1560,
+        followingCount: 180,
+        category: 'creators'
+      },
+      {
+        id: 'demo-5',
+        username: 'sport_ga',
+        fullname: 'Sport Gabon',
+        bio: 'Actualités sportives � | Football & plus',
+        followersCount: 3200,
+        followingCount: 95,
+        verified: true,
+        category: 'popular',
+        badge: 'crown'
+      },
+      {
+        id: 'demo-6',
+        username: 'music_241',
+        fullname: 'Music Gabon',
+        bio: 'Musique gabonaise 🎵 | Artistes locaux',
+        followersCount: 1890,
+        followingCount: 320,
+        verified: true,
+        category: 'creators',
+        badge: 'verified'
+      },
+      {
+        id: 'demo-7',
+        username: 'fashion_lbv',
+        fullname: 'Fashion Libreville',
+        bio: 'Mode africaine � | Créateurs gabonais',
+        followersCount: 2450,
+        followingCount: 280,
+        verified: true,
+        category: 'popular',
+        badge: 'star'
+      },
+      {
+        id: 'demo-8',
+        username: 'tech_ga',
+        fullname: 'Tech Gabon',
+        bio: 'Innovation & technologie 💻 | Startups gabonaises',
+        followersCount: 1120,
+        followingCount: 150,
+        category: 'creators'
+      }
+    ];
+
     try {
       setLoading(true);
-      // Pour l'instant, on charge tous les utilisateurs
-      // TODO: Implémenter une vraie logique de suggestions 
       const allUsers = await userApi.searchUsers("");
       const filteredUsers = allUsers
         .filter(u => u.id !== currentUserId)
@@ -42,31 +134,38 @@ const PeoplePage = () => {
           followersCount: u.followersCount || 0,
           followingCount: u.followingCount || 0
         }));
-      setUsers(filteredUsers);
+      
+      const usersToDisplay = [...filteredUsers, ...demoUsers];
+      setUsers(usersToDisplay);
 
-      // Charger les statuts de suivi
-      const followingStatuses = await Promise.all(
-        filteredUsers.map(async (user) => {
-          try {
-            const isFollowing = await userApi.isFollowing(user.id);
-            return { userId: user.id, isFollowing };
-          } catch {
-            return { userId: user.id, isFollowing: false };
-          }
-        })
-      );
+      if (filteredUsers.length > 0) {
+        const followingStatuses = await Promise.all(
+          filteredUsers.map(async (user) => {
+            try {
+              const isFollowing = await userApi.isFollowing(user.id);
+              return { userId: user.id, isFollowing };
+            } catch {
+              return { userId: user.id, isFollowing: false };
+            }
+          })
+        );
 
-      const followingSet = new Set(
-        followingStatuses.filter(s => s.isFollowing).map(s => s.userId)
-      );
-      setFollowingUsers(followingSet);
+        const followingSet = new Set(
+          followingStatuses.filter(s => s.isFollowing).map(s => s.userId)
+        );
+        setFollowingUsers(followingSet);
+      }
     } catch (error) {
       console.error('Error loading suggestions:', error);
-      toast({ title: "Erreur", description: "Impossible de charger les suggestions", variant: "destructive" });
+      setUsers(demoUsers);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadSuggestions();
+  }, []);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -117,7 +216,6 @@ const PeoplePage = () => {
         toast({ title: "✅ Abonné", description: "Vous suivez maintenant cet utilisateur" });
       }
 
-      // Mettre à jour le compteur
       setUsers(prevUsers =>
         prevUsers.map(user =>
           user.id === userId
@@ -130,12 +228,12 @@ const PeoplePage = () => {
             : user
         )
       );
-    } catch (error: any) {
-      // Si erreur 404, c'est que le backend n'est pas encore rebuild
-      if (error?.response?.status === 404) {
+    } catch (error: unknown) {
+      const err = error as { response?: { status?: number } };
+      if (err?.response?.status === 404) {
         toast({ 
           title: "⚠️ Fonctionnalité en cours de déploiement", 
-          description: "Le backend doit être rebuild. Voir DEPLOIEMENT_RAPIDE.md",
+          description: "Le backend doit être rebuild.",
           variant: "destructive"
         });
       } else {
@@ -150,6 +248,19 @@ const PeoplePage = () => {
     }
   };
 
+  const filteredUsers = users.filter(user => {
+    if (activeCategory === 'all') return true;
+    if (activeCategory === 'verified') return user.verified;
+    if (activeCategory === 'popular') return user.followersCount > 2000;
+    if (activeCategory === 'creators') return user.category === 'creators';
+    return true;
+  });
+
+  const topUsers = users
+    .filter(u => u.verified && u.followersCount > 2000)
+    .sort((a, b) => b.followersCount - a.followersCount)
+    .slice(0, 3);
+
   return (
     <div className="flex justify-center">
       <div className="w-full max-w-2xl pb-6">
@@ -162,18 +273,80 @@ const PeoplePage = () => {
             </h2>
             
             {/* Search */}
-            <div className="relative">
+            <div className="relative mb-3">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 placeholder="Rechercher des personnes..."
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-muted text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
+
+            {/* Categories */}
+            <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
+              {CATEGORIES.map(cat => {
+                const Icon = cat.icon;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setActiveCategory(cat.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                      activeCategory === cat.id
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
+
+        {/* Top Suggestions Banner */}
+        {!loading && topUsers.length > 0 && activeCategory === 'all' && (
+          <div className="mx-3 mb-4 p-4 rounded-xl bg-gradient-to-r from-primary/10 via-secondary/10 to-accent/10 border">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <h3 className="font-bold text-sm text-foreground">Suggestions populaires</h3>
+            </div>
+            <div className="flex gap-3 overflow-x-auto scrollbar-none">
+              {topUsers.map(user => {
+                const userInitials = (user.username || user.id).substring(0, 2).toUpperCase();
+                return (
+                  <div key={user.id} className="flex-shrink-0 w-24 text-center">
+                    <div className="relative inline-block mb-2">
+                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-primary-foreground font-bold shadow-lg">
+                        {userInitials}
+                      </div>
+                      {user.badge === 'crown' && (
+                        <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center shadow-md">
+                          <Crown className="w-3.5 h-3.5 text-white" />
+                        </div>
+                      )}
+                      {user.badge === 'star' && (
+                        <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center shadow-md">
+                          <Star className="w-3.5 h-3.5 text-white fill-white" />
+                        </div>
+                      )}
+                      {user.badge === 'verified' && (
+                        <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center shadow-md">
+                          <BadgeCheck className="w-3.5 h-3.5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs font-semibold text-foreground truncate">{user.fullname || user.username}</p>
+                    <p className="text-[10px] text-muted-foreground">{user.followersCount} abonnés</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Loading */}
         {loading && (
@@ -183,17 +356,23 @@ const PeoplePage = () => {
           </div>
         )}
 
-        {/* Users List */}
-        {!loading && users.length === 0 && (
-          <div className="p-8 text-center">
-            <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-            <p className="text-muted-foreground">Aucun utilisateur trouvé</p>
+        {/* Empty State */}
+        {!loading && filteredUsers.length === 0 && (
+          <div className="p-12 text-center">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <Users className="w-10 h-10 text-primary-foreground" />
+            </div>
+            <p className="text-xl font-bold text-foreground mb-2">Aucun utilisateur trouvé</p>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+              Essayez une autre recherche ou explorez les suggestions
+            </p>
           </div>
         )}
 
-        {!loading && users.length > 0 && (
+        {/* Users List */}
+        {!loading && filteredUsers.length > 0 && (
           <div className="space-y-2 px-3">
-            {users.map((user) => {
+            {filteredUsers.map((user) => {
               const isFollowing = followingUsers.has(user.id);
               const isLoading = loadingFollow.has(user.id);
               const userInitials = (user.username || user.id).substring(0, 2).toUpperCase();
@@ -201,34 +380,60 @@ const PeoplePage = () => {
               return (
                 <div
                   key={user.id}
-                  className="bg-card rounded-xl shadow-sm border p-3 hover:shadow-md transition-all"
+                  className="bg-card rounded-xl shadow-sm border p-3 hover:shadow-md transition-all hover:scale-[1.01] duration-200"
                 >
                   <div className="flex items-center gap-3">
-                    {/* Avatar */}
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-primary-foreground font-bold text-sm shrink-0 shadow-md">
-                      {userInitials}
+                    {/* Avatar with Badge */}
+                    <div className="relative shrink-0">
+                      <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary via-secondary to-accent flex items-center justify-center text-primary-foreground font-bold text-sm shadow-md">
+                        {userInitials}
+                      </div>
+                      {user.badge === 'crown' && (
+                        <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center shadow-md border-2 border-card">
+                          <Crown className="w-3 h-3 text-white" />
+                        </div>
+                      )}
+                      {user.badge === 'star' && (
+                        <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center shadow-md border-2 border-card">
+                          <Star className="w-3 h-3 text-white fill-white" />
+                        </div>
+                      )}
+                      {user.badge === 'verified' && (
+                        <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center shadow-md border-2 border-card">
+                          <BadgeCheck className="w-3 h-3 text-white" />
+                        </div>
+                      )}
                     </div>
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground truncate">
-                        {user.fullname || user.username || 'Utilisateur'}
-                      </h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-semibold text-foreground truncate">
+                          {user.fullname || user.username || 'Utilisateur'}
+                        </h3>
+                        {user.verified && !user.badge && (
+                          <BadgeCheck className="w-4 h-4 text-blue-500 shrink-0" />
+                        )}
+                      </div>
                       <p className="text-sm text-muted-foreground truncate">
                         @{user.username || user.id.substring(0, 8)}
                       </p>
                       {user.bio && (
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                           {user.bio}
                         </p>
                       )}
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        <span>
-                          <strong className="text-foreground">{user.followersCount || 0}</strong> abonnés
-                        </span>
-                        <span>
-                          <strong className="text-foreground">{user.followingCount || 0}</strong> abonnements
-                        </span>
+                      <div className="flex items-center gap-3 mt-2">
+                        <div className="flex items-center gap-1 text-xs">
+                          <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+                          <span className="font-bold text-foreground">{user.followersCount || 0}</span>
+                          <span className="text-muted-foreground">abonnés</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs">
+                          <div className="w-1.5 h-1.5 rounded-full bg-secondary"></div>
+                          <span className="font-bold text-foreground">{user.followingCount || 0}</span>
+                          <span className="text-muted-foreground">abonnements</span>
+                        </div>
                       </div>
                     </div>
 

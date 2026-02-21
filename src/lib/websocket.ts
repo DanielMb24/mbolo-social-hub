@@ -10,7 +10,18 @@ class WebSocketService {
       return;
     }
 
-    const socket = new SockJS('http://localhost:8083/ws-chat');
+    // Utiliser l'API Gateway au lieu de se connecter directement au service
+    // SockJS n'accepte que http:// ou https://, pas ws://
+    let wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:8080/ws-chat';
+    
+    // Convertir ws:// en http:// et wss:// en https://
+    if (wsUrl.startsWith('ws://')) {
+      wsUrl = wsUrl.replace('ws://', 'http://');
+    } else if (wsUrl.startsWith('wss://')) {
+      wsUrl = wsUrl.replace('wss://', 'https://');
+    }
+    
+    const socket = new SockJS(wsUrl);
     
     this.client = new Client({
       webSocketFactory: () => socket as any,

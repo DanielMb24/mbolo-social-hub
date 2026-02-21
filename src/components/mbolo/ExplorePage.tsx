@@ -34,12 +34,102 @@ const ExplorePage = () => {
   }, []);
 
   const loadPosts = async () => {
+    // Posts de démonstration par défaut
+    const demoPosts = [
+      {
+        id: 'demo-1',
+        content: 'Bienvenue sur MBolo ! 🎉 Découvrez les tendances au Gabon',
+        likes: ['demo'],
+        commentsCount: 12,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-2',
+        content: 'Libreville by night 🌃 #Gabon #Libreville',
+        likes: [],
+        commentsCount: 8,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-3',
+        content: 'La culture gabonaise est riche et diversifiée 🇬🇦',
+        likes: [],
+        commentsCount: 15,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-4',
+        content: 'Musique gabonaise 🎵 #MBolo #Musique',
+        likes: [],
+        commentsCount: 5,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-5',
+        content: 'Sport et passion ⚽ #Sport #Gabon',
+        likes: [],
+        commentsCount: 20,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-6',
+        content: 'Cuisine traditionnelle gabonaise 🍲',
+        likes: [],
+        commentsCount: 18,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-7',
+        content: 'Mode africaine et créateurs locaux 👗',
+        likes: [],
+        commentsCount: 9,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-8',
+        content: 'Innovation technologique au Gabon 💻',
+        likes: [],
+        commentsCount: 14,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-9',
+        content: 'Nature et biodiversité gabonaise 🌴',
+        likes: [],
+        commentsCount: 22,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-10',
+        content: 'Art contemporain gabonais 🎨',
+        likes: [],
+        commentsCount: 11,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-11',
+        content: 'Entrepreneuriat au Gabon 💼',
+        likes: [],
+        commentsCount: 16,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-12',
+        content: 'Tourisme et découverte 🏖️',
+        likes: [],
+        commentsCount: 19,
+        createdAt: new Date().toISOString()
+      }
+    ];
+
     try {
       setLoading(true);
       const data = await postApi.getFeed(0, 30);
-      setPosts(data || []);
+      // Si on a des posts réels, les afficher, sinon afficher les démos
+      setPosts(data && data.length > 0 ? data : demoPosts);
     } catch {
-      setPosts([]);
+      // En cas d'erreur, afficher les posts de démonstration
+      setPosts(demoPosts);
     } finally {
       setLoading(false);
     }
@@ -88,9 +178,14 @@ const ExplorePage = () => {
                 Chargement...
               </div>
             ) : posts.length === 0 ? (
-              <div className="p-12 text-center text-muted-foreground">
-                <Grid3X3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>Aucun contenu à explorer</p>
+              <div className="p-12 text-center">
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center mx-auto mb-4 shadow-lg">
+                  <Grid3X3 className="w-10 h-10 text-primary-foreground" />
+                </div>
+                <p className="text-xl font-bold text-foreground mb-2">Explorez MBolo</p>
+                <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                  Découvrez les contenus tendances, les hashtags populaires et les personnes à suivre
+                </p>
               </div>
             ) : (
               <div className={`grid gap-1 ${isMobile ? "grid-cols-3" : "grid-cols-3 md:grid-cols-4"}`}>

@@ -17,12 +17,99 @@ const VideoPage = () => {
   useEffect(() => { loadVideos(); }, []);
 
   const loadVideos = async () => {
+    // Vidéos de démonstration par défaut
+    const demoVideos = [
+      {
+        id: 'demo-1',
+        title: 'Bienvenue sur MBolo Vidéos 🎬',
+        description: 'Découvrez les vidéos tendances au Gabon 🇬🇦',
+        userId: 'mbolo',
+        views: 12500,
+        likes: ['demo'],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-2',
+        title: 'Danse traditionnelle gabonaise 💃',
+        description: 'Culture et tradition #Gabon #Culture',
+        userId: 'culture_ga',
+        views: 8900,
+        likes: [],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-3',
+        title: 'Cuisine gabonaise 🍗',
+        description: 'Recette du poulet Nyembwe',
+        userId: 'chef_lbv',
+        views: 15200,
+        likes: [],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-4',
+        title: 'Musique gabonaise 🎵',
+        description: 'Les meilleurs artistes du moment',
+        userId: 'music_241',
+        views: 23400,
+        likes: [],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-5',
+        title: 'Libreville by night 🌃',
+        description: 'Découvrez la capitale gabonaise',
+        userId: 'travel_ga',
+        views: 18700,
+        likes: [],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-6',
+        title: 'Sport au Gabon ⚽',
+        description: 'Football et passion #Sport',
+        userId: 'sport_ga',
+        views: 11200,
+        likes: [],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-7',
+        title: 'Mode africaine 👗',
+        description: 'Créateurs gabonais #Fashion',
+        userId: 'fashion_lbv',
+        views: 9800,
+        likes: [],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-8',
+        title: 'Tech & Innovation 💻',
+        description: 'Startups gabonaises qui innovent',
+        userId: 'tech_ga',
+        views: 7600,
+        likes: [],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'demo-9',
+        title: 'Nature gabonaise 🌴',
+        description: 'Forêts et biodiversité',
+        userId: 'nature_ga',
+        views: 14300,
+        likes: [],
+        createdAt: new Date().toISOString()
+      }
+    ];
+
     try {
       setLoading(true);
       const data = await videoApi.getVideos();
-      setVideos(data);
+      // Si on a des vidéos réelles, les afficher, sinon afficher les démos
+      setVideos(data && data.length > 0 ? data : demoVideos);
     } catch {
-      setVideos([]);
+      // En cas d'erreur, afficher les vidéos de démonstration
+      setVideos(demoVideos);
     } finally {
       setLoading(false);
     }
@@ -86,10 +173,18 @@ const VideoPage = () => {
 
         {/* Empty state */}
         {!loading && videos.length === 0 && (
-          <div className="p-12 text-center text-muted-foreground">
-            <Play className="w-16 h-16 mx-auto mb-4 opacity-30" />
-            <p className="text-lg font-semibold mb-1">Aucune vidéo</p>
-            <p className="text-sm">Soyez le premier à partager une vidéo !</p>
+          <div className="p-12 text-center">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <Play className="w-10 h-10 text-primary-foreground" />
+            </div>
+            <p className="text-xl font-bold text-foreground mb-2">Aucune vidéo pour le moment</p>
+            <p className="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
+              Soyez le premier à partager une vidéo et inspirez la communauté MBolo !
+            </p>
+            <button className="px-6 py-2.5 rounded-full bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity flex items-center gap-2 mx-auto">
+              <Upload className="w-4 h-4" />
+              Publier une vidéo
+            </button>
           </div>
         )}
 
