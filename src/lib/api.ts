@@ -366,7 +366,7 @@ export const postApi = {
     api.post(`/api/posts/${postId}/like`),
   
   unlikePost: (postId: string) => 
-    api.delete(`/api/posts/${postId}/like`),
+    api.post(`/api/posts/${postId}/like`), // Toggle like/unlike
   
   getComments: async (postId: string) => {
     const response = await api.get<ApiResponse<any>>(`/api/posts/${postId}/comments`);

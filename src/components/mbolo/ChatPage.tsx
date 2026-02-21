@@ -257,16 +257,24 @@ const ChatPage = () => {
       });
       
       if (!response.ok) {
-        throw new Error('Erreur lors de l\'upload');
+        const errorData = await response.json().catch(() => ({ message: 'Erreur inconnue' }));
+        console.error('Erreur upload:', errorData);
+        throw new Error(errorData.message || 'Erreur lors de l\'upload');
       }
       
       const result = await response.json();
-      await chatApi.sendMessage(selectedConvo, result.url || file.name, type);
       
-      toast.success(type === 'IMAGE' ? 'Image envoyée' : 'Fichier envoyé');
+      // Envoyer le message avec l'URL du fichier
+      if (result.url) {
+        await chatApi.sendMessage(selectedConvo, result.url, type);
+        toast.success(type === 'IMAGE' ? 'Image envoyée' : 'Fichier envoyé');
+      } else {
+        throw new Error('URL du fichier manquante');
+      }
     } catch (error) {
       console.error("Erreur upload fichier:", error);
-      toast.error("Erreur lors de l'envoi du fichier");
+      const errorMessage = error instanceof Error ? error.message : "Erreur lors de l'envoi du fichier";
+      toast.error(errorMessage);
     } finally {
       setSending(false);
     }
@@ -448,16 +456,24 @@ const ChatPage = () => {
       });
       
       if (!response.ok) {
-        throw new Error('Erreur lors de l\'upload');
+        const errorData = await response.json().catch(() => ({ message: 'Erreur inconnue' }));
+        console.error('Erreur upload audio:', errorData);
+        throw new Error(errorData.message || 'Erreur lors de l\'upload');
       }
       
       const result = await response.json();
-      await chatApi.sendMessage(selectedConvo, result.url || 'Message audio', 'AUDIO');
       
-      toast.success('Message audio envoyé');
+      // Envoyer le message avec l'URL de l'audio
+      if (result.url) {
+        await chatApi.sendMessage(selectedConvo, result.url, 'AUDIO');
+        toast.success('Message audio envoyé');
+      } else {
+        throw new Error('URL de l\'audio manquante');
+      }
     } catch (error) {
       console.error("Erreur upload audio:", error);
-      toast.error("Erreur lors de l'envoi du message audio");
+      const errorMessage = error instanceof Error ? error.message : "Erreur lors de l'envoi du message audio";
+      toast.error(errorMessage);
     } finally {
       setSending(false);
       setShowAudioRecorder(false);

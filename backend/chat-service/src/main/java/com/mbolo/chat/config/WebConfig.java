@@ -19,7 +19,8 @@ public class WebConfig implements WebMvcConfigurer {
     
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        // Permettre l'accès CORS aux fichiers uploadés
+        // CORS géré par l'API Gateway - pas de configuration ici pour éviter les doublons
+        // Seulement pour les fichiers statiques uploadés
         registry.addMapping("/uploads/**")
                 .allowedOrigins("http://localhost:5173", "http://localhost:3000", "http://localhost:8080")
                 .allowedMethods("GET", "HEAD")
