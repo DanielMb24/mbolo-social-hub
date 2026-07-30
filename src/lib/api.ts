@@ -1,3 +1,11 @@
+import {
+  getErrorMessage,
+  getHttpStatus,
+  httpErrorTitle,
+  notifyAppError,
+  shouldNotifyHttpError,
+} from "./error-notifier";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:8080');
 const WS_URL = import.meta.env.VITE_WS_URL ?? (import.meta.env.PROD ? '' : 'ws://localhost:8080');
 
@@ -26,11 +34,11 @@ const fileToDataUrl = (file: File): Promise<string> =>
   });
 
 export interface AuthResponse {
-  success: boolean;
+  success?: boolean;
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
   userId: string;
-  message: string;
+  message?: string;
 }
 
 export interface LoginRequest {
@@ -102,18 +110,26 @@ export interface Message {
 export interface Conversation {
   id: string;
   participants: string[];
-  lastMessage?: Message;
+  type?: "PRIVATE" | "GROUP";
+  groupName?: string;
+  lastMessage?: Message | string;
+  lastMessageTime?: string;
+  unreadCount?: number;
   updatedAt: string;
+}
+
+export interface SearchResponse {
+  users: UserProfile[];
+  posts: Post[];
+  conversations: Conversation[];
 }
 
 // Token management
 export const tokenManager = {
   getAccessToken: () => localStorage.getItem('token') || localStorage.getItem('accessToken'),
-  getRefreshToken: () => localStorage.getItem('refreshToken'),
-  setTokens: (accessToken: string, refreshToken: string) => {
+  setTokens: (accessToken: string) => {
     localStorage.setItem('token', accessToken);
     localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
   },
   clearTokens: () => {
     localStorage.removeItem('token');
@@ -154,6 +170,7 @@ class ApiClient {
       const response = await fetch(`${this.baseURL}${endpoint}`, {
         ...options,
         headers,
+        credentials: 'include',
       });
       
       if (response.status === 401) {
@@ -165,20 +182,38 @@ class ApiClient {
           const retryResponse = await fetch(`${this.baseURL}${endpoint}`, {
             ...options,
             headers,
+            credentials: 'include',
           });
           return this.handleResponse<T>(retryResponse);
         } else {
           tokenManager.clearTokens();
+          notifyAppError({
+            title: "Session expirée",
+            message: "Reconnectez-vous pour continuer.",
+            severity: "warning",
+            status: 401,
+            source: endpoint,
+          });
           window.location.href = '/';
-          throw new Error('Session expired. Please login again.');
+          throw new Error('Session expirée. Reconnectez-vous.');
         }
       }
       
       return this.handleResponse<T>(response);
     } catch (error) {
-      // Ne pas logger les 404 pour éviter le spam dans la console
-      if (!(error instanceof Error && error.message.includes('404'))) {
-        console.error('API Request Error:', error);
+      const status = getHttpStatus(error);
+      if (shouldNotifyHttpError(status)) {
+        notifyAppError({
+          title: httpErrorTitle(status),
+          message: status ? getErrorMessage(error) : "Impossible de joindre le serveur.",
+          severity: status === 401 ? "warning" : "error",
+          status,
+          source: endpoint,
+        });
+      }
+
+      if (import.meta.env.DEV && status !== 404) {
+        console.error('API Request Error:', { endpoint, status, error });
       }
       throw error;
     }
@@ -208,20 +243,17 @@ class ApiClient {
   }
 
   private async refreshToken(): Promise<boolean> {
-    const refreshToken = tokenManager.getRefreshToken();
-    if (!refreshToken) return false;
-
     try {
       const response = await fetch(`${this.baseURL}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+        credentials: 'include',
       });
 
       if (response.ok) {
         const apiResponse: ApiResponse<AuthResponse> = await response.json();
         if (apiResponse.data) {
-          tokenManager.setTokens(apiResponse.data.accessToken, apiResponse.data.refreshToken);
+          tokenManager.setTokens(apiResponse.data.accessToken);
           return true;
         }
       }
@@ -260,19 +292,34 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${this.baseURL}${endpoint}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        ...additionalData,
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        fileData: await fileToDataUrl(file),
-      }),
-    });
+    try {
+      const response = await fetch(`${this.baseURL}${endpoint}`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          ...additionalData,
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          fileData: await fileToDataUrl(file),
+        }),
+      });
 
-    return this.handleResponse(response);
+      return this.handleResponse(response);
+    } catch (error) {
+      const status = getHttpStatus(error);
+      if (shouldNotifyHttpError(status)) {
+        notifyAppError({
+          title: httpErrorTitle(status),
+          message: status ? getErrorMessage(error) : "Upload interrompu. Vérifiez votre connexion.",
+          severity: status === 413 ? "warning" : "error",
+          status,
+          source: endpoint,
+        });
+      }
+      throw error;
+    }
   }
 }
 
@@ -293,16 +340,18 @@ export const authApi = {
   
   logout: () => {
     tokenManager.clearTokens();
-    return Promise.resolve();
+    return api.post('/api/auth/logout').catch(() => undefined);
   },
   
-  refreshToken: async (refreshToken: string) => {
-    const response = await api.post<ApiResponse<AuthResponse>>('/api/auth/refresh', { refreshToken });
+  refreshToken: async () => {
+    const response = await api.post<ApiResponse<AuthResponse>>('/api/auth/refresh');
     return response.data!;
   },
   
-  getCurrentUser: () => 
-    api.get<UserProfile>('/api/auth/me'),
+  getCurrentUser: async () => {
+    const response = await api.get<ApiResponse<UserProfile> | UserProfile>('/api/auth/me');
+    return unwrapApiData<UserProfile>(response, null as unknown as UserProfile);
+  },
 };
 
 // User API
@@ -464,9 +513,20 @@ export const notificationApi = {
     const response = await api.get<ApiResponse<AppNotificationRecord[]> | AppNotificationRecord[]>('/api/notifications');
     return unwrapApiData<AppNotificationRecord[]>(response, []);
   },
+  getUnreadCount: async () => {
+    const response = await api.get<ApiResponse<{ count: number }> | { count: number }>('/api/notifications/unread-count');
+    return unwrapApiData<{ count: number }>(response, { count: 0 }).count;
+  },
   markRead: (id: string) => api.post(`/api/notifications/${id}/read`),
   markAllRead: () => api.post('/api/notifications/read-all'),
   dismiss: (id: string) => api.delete(`/api/notifications/${id}`),
+};
+
+export const searchApi = {
+  global: async (query: string) => {
+    const response = await api.get<ApiResponse<SearchResponse> | SearchResponse>(`/api/search?q=${encodeURIComponent(query)}`);
+    return unwrapApiData<SearchResponse>(response, { users: [], posts: [], conversations: [] });
+  },
 };
 
 // Video API

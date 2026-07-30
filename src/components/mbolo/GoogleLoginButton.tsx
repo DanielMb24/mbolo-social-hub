@@ -11,13 +11,12 @@ export const GoogleLoginButton = ({ onSuccess }: GoogleLoginButtonProps) => {
     onSuccess: async (tokenResponse) => {
       try {
         // Envoyer le token au backend
-        const response = await api.post<{ success?: boolean; data?: { accessToken: string; refreshToken: string; userId: string } }>('/api/auth/google', {
+        const response = await api.post<{ success?: boolean; data?: { accessToken: string; userId: string } }>('/api/auth/google', {
           idToken: tokenResponse.access_token
         });
 
         if (response.success && response.data) {
           localStorage.setItem('token', response.data.accessToken);
-          localStorage.setItem('refreshToken', response.data.refreshToken);
           localStorage.setItem('userId', response.data.userId);
           
           toast.success('Connexion Google réussie !');

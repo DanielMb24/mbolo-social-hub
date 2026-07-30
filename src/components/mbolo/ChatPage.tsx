@@ -1,5 +1,5 @@
 import { Send, Phone, VideoIcon, MoreVertical, Search, Plus, Image, Mic, Smile, ArrowLeft, Check, CheckCheck, Loader2, Paperclip, User, Info, ThumbsUp } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { lazy, Suspense, useCallback, useState, useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { chatApi, type Conversation, type Message } from "@/lib/chat-api";
 import { wsService } from "@/lib/websocket";
@@ -18,11 +18,19 @@ import { ReplyPreview } from "./ReplyPreview";
 import { ForwardMessageDialog } from "./ForwardMessageDialog";
 import { OnlineStatus } from "./OnlineStatus";
 import { MediaFallback } from "./MediaFallback";
-import { userApi, type UserProfile } from "@/lib/api";
+import { api, userApi, type UserProfile } from "@/lib/api";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useNavigate } from "react-router-dom";
-import data from '@emoji-mart/data';
-import Picker from '@emoji-mart/react';
+
+const EmojiPickerPanel = lazy(() => import("./EmojiPickerPanel"));
+
+interface ChatSocketPayload extends Partial<Message> {
+  type?: Message["type"] | "SEEN" | "DELETED" | "TYPING";
+  data?: string[];
+  userId?: string;
+  userName?: string;
+  messageId?: string;
+}
 
 const ChatPage = () => {
   const [selectedConvo, setSelectedConvo] = useState<string | null>(null);
@@ -54,16 +62,15 @@ const ChatPage = () => {
   const navigate = useNavigate();
 
   // Charger les profils utilisateurs
-  const fetchUserProfile = async (userId: string) => {
-    if (userProfiles[userId]) return userProfiles[userId];
+  const fetchUserProfile = useCallback(async (userId: string) => {
     try {
       const profile = await userApi.getProfile(userId);
-      setUserProfiles(prev => ({ ...prev, [userId]: profile }));
+      setUserProfiles(prev => (prev[userId] ? prev : { ...prev, [userId]: profile }));
       return profile;
     } catch (error) {
       return null;
     }
-  };
+  }, []);
 
   // Charger les conversations
   useEffect(() => {
@@ -92,7 +99,7 @@ const ChatPage = () => {
       }
     };
     loadConversations();
-  }, []);
+  }, [fetchUserProfile]);
 
   // Charger les messages et connecter WebSocket
   useEffect(() => {
@@ -119,7 +126,7 @@ const ChatPage = () => {
     loadMessages();
 
     wsService.connect((raw: unknown) => {
-      const data = raw as any;
+      const data = raw as ChatSocketPayload;
       if (data.type === 'SEEN') {
         setMessages(prev => prev.map(msg => {
           if (data.data && Array.isArray(data.data) && data.data.includes(msg.id)) {
@@ -175,20 +182,7 @@ const ChatPage = () => {
     if (!selectedConvo) return;
     try {
       setSending(true);
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('conversationId', selectedConvo);
-      formData.append('type', type);
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}/api/chat/upload`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-        body: formData,
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: 'Erreur inconnue' }));
-        throw new Error(errorData.message || "Erreur lors de l'upload");
-      }
-      const result = await response.json();
+      const result = await api.uploadFile('/api/chat/upload', file, { conversationId: selectedConvo, type });
       if (result.url) {
         await chatApi.sendMessage(selectedConvo, result.url, type);
         toast.success(type === 'IMAGE' ? 'Image envoyée' : 'Fichier envoyé');
@@ -281,20 +275,7 @@ const ChatPage = () => {
     try {
       setSending(true);
       const audioFile = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
-      const formData = new FormData();
-      formData.append('file', audioFile);
-      formData.append('conversationId', selectedConvo);
-      formData.append('type', 'AUDIO');
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}/api/chat/upload`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-        body: formData,
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: 'Erreur inconnue' }));
-        throw new Error(errorData.message || "Erreur lors de l'upload");
-      }
-      const result = await response.json();
+      const result = await api.uploadFile('/api/chat/upload', audioFile, { conversationId: selectedConvo, type: 'AUDIO' });
       if (result.url) {
         await chatApi.sendMessage(selectedConvo, result.url, 'AUDIO');
         toast.success('Message audio envoyé');
@@ -316,7 +297,9 @@ const ChatPage = () => {
           const obj = result as { data?: unknown };
           if (Array.isArray(obj.data)) setConversations(obj.data as Conversation[]);
         }
-      } catch {}
+      } catch (error) {
+        console.warn("Impossible de recharger les conversations", error);
+      }
     };
     reload();
     setSelectedConvo(conversationId);
@@ -688,7 +671,9 @@ const ChatPage = () => {
                   </button>
                   {showEmojiPicker && (
                     <div className="absolute bottom-full left-0 mb-2 z-50">
-                      <Picker data={data} onEmojiSelect={handleEmojiSelect} theme="auto" locale="fr" />
+                      <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Chargement...</div>}>
+                        <EmojiPickerPanel onEmojiSelect={handleEmojiSelect} />
+                      </Suspense>
                     </div>
                   )}
                 </div>

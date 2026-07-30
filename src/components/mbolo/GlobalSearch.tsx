@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, User, FileText, MessageCircle, X, Loader2 } from "lucide-react";
-import { chatApi, postApi, userApi } from "@/lib/api";
+import { searchApi, type Conversation, type Post, type UserProfile } from "@/lib/api";
 
 interface SearchResult {
   id: string;
@@ -8,46 +8,51 @@ interface SearchResult {
   title: string;
   subtitle?: string;
   avatarInitials: string;
+  targetTab?: "feed" | "chat" | "profile";
+  targetId?: string;
 }
 
 const searchAll = async (query: string): Promise<SearchResult[]> => {
   if (!query.trim()) return [];
 
-  const q = query.toLowerCase();
-  const [users, posts, conversations] = await Promise.all([
-    userApi.searchUsers(query).catch(() => []),
-    postApi.getFeed(0, 50).catch(() => []),
-    chatApi.getConversations().catch(() => []),
-  ]);
+  const { users, posts, conversations } = await searchApi.global(query).catch(() => ({
+    users: [],
+    posts: [],
+    conversations: [],
+  }));
 
-  const userResults = users.map((user: any) => ({
+  const userResults = users.map((user: UserProfile) => ({
     id: user.id,
     type: "user" as const,
     title: user.fullname || user.username || "Utilisateur",
     subtitle: `@${user.username || user.id.slice(0, 8)}${user.location ? ` · ${user.location}` : ''}`,
     avatarInitials: (user.username || user.id || "U").slice(0, 2).toUpperCase(),
+    targetTab: "profile" as const,
+    targetId: user.id,
   }));
 
   const postResults = posts
-    .filter((post: any) => String(post.content || '').toLowerCase().includes(q))
     .slice(0, 10)
-    .map((post: any) => ({
+    .map((post: Post) => ({
       id: post.id,
       type: "post" as const,
       title: String(post.content || "Publication").slice(0, 80),
       subtitle: new Date(post.createdAt).toLocaleDateString('fr-FR'),
       avatarInitials: String(post.authorId || "U").slice(0, 2).toUpperCase(),
+      targetTab: "feed" as const,
+      targetId: post.id,
     }));
 
   const conversationResults = conversations
-    .filter((conversation: any) => String(conversation.lastMessage || conversation.groupName || '').toLowerCase().includes(q))
     .slice(0, 5)
-    .map((conversation: any) => ({
+    .map((conversation: Conversation) => ({
       id: conversation.id,
       type: "conversation" as const,
       title: conversation.groupName || "Conversation",
-      subtitle: conversation.lastMessage || "Discussion",
+      subtitle: typeof conversation.lastMessage === "string" ? conversation.lastMessage : "Discussion",
       avatarInitials: String(conversation.groupName || conversation.id || "C").slice(0, 2).toUpperCase(),
+      targetTab: "chat" as const,
+      targetId: conversation.id,
     }));
 
   return [...userResults, ...postResults, ...conversationResults];
@@ -71,9 +76,10 @@ const labelForType = (type: SearchResult["type"]) => {
 
 interface GlobalSearchProps {
   onClose: () => void;
+  onNavigate?: (result: SearchResult) => void;
 }
 
-const GlobalSearch = ({ onClose }: GlobalSearchProps) => {
+const GlobalSearch = ({ onClose, onNavigate }: GlobalSearchProps) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -182,6 +188,10 @@ const GlobalSearch = ({ onClose }: GlobalSearchProps) => {
                     {group.map(item => (
                       <button
                         key={item.id}
+                        onClick={() => {
+                          onNavigate?.(item);
+                          onClose();
+                        }}
                         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left"
                       >
                         <div className="relative shrink-0">

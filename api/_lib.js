@@ -1,5 +1,6 @@
 import { MongoClient, ObjectId } from "mongodb";
 import crypto from "node:crypto";
+import { parseCookies } from "./_http.js";
 
 let clientPromise;
 
@@ -60,7 +61,6 @@ export function publicUser(user) {
   return {
     id: String(user._id || user.id),
     username: user.username,
-    email: user.email,
     fullname: user.fullname || user.fullName || "",
     fullName: user.fullName || user.fullname || "",
     bio: user.bio || "",
@@ -70,6 +70,14 @@ export function publicUser(user) {
     followersCount: user.followersCount || 0,
     followingCount: user.followingCount || 0,
     createdAt: user.createdAt || new Date().toISOString(),
+  };
+}
+
+export function privateUser(user) {
+  if (!user) return null;
+  return {
+    ...publicUser(user),
+    email: user.email || "",
   };
 }
 
@@ -85,9 +93,10 @@ export function verifyPassword(password, stored) {
 }
 
 export function signToken(payload, expiresInSeconds = 60 * 60 * 24 * 7) {
-  const secret = process.env.JWT_SECRET || "dev-secret-change-me";
+  const secret = getJwtSecret();
   const body = {
     ...payload,
+    typ: payload.typ || "access",
     exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
   };
   const encoded = Buffer.from(JSON.stringify(body)).toString("base64url");
@@ -95,13 +104,23 @@ export function signToken(payload, expiresInSeconds = 60 * 60 * 24 * 7) {
   return `${encoded}.${sig}`;
 }
 
-export function verifyToken(token) {
+export function verifyToken(token, expectedType = "access") {
   if (!token || !token.includes(".")) return null;
-  const secret = process.env.JWT_SECRET || "dev-secret-change-me";
+  const secret = getJwtSecret();
   const [encoded, sig] = token.split(".");
+  if (!encoded || !sig) return null;
   const expected = crypto.createHmac("sha256", secret).update(encoded).digest("base64url");
+  if (Buffer.byteLength(sig) !== Buffer.byteLength(expected)) return null;
   if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-  const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!payload || typeof payload !== "object") return null;
+  if (expectedType && payload.typ !== expectedType) return null;
+  if (!payload.userId || typeof payload.userId !== "string") return null;
   if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
   return payload;
 }
@@ -111,6 +130,27 @@ export function currentUserId(req) {
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const payload = verifyToken(token);
   return payload?.userId || null;
+}
+
+export function currentAuth(req) {
+  const auth = req.headers.authorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  return verifyToken(token, "access");
+}
+
+export function refreshTokenFromRequest(req) {
+  const cookies = parseCookies(req);
+  return cookies.mbolo_refresh || "";
+}
+
+export function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    const error = new Error("JWT_SECRET is missing or too short");
+    error.status = 503;
+    throw error;
+  }
+  return secret;
 }
 
 export function makeId(id) {

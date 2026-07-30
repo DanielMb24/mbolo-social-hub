@@ -3,8 +3,10 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useState, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { Loader2 } from "lucide-react";
+import { authApi, tokenManager } from "@/lib/api";
+import { ErrorNotificationBridge } from "@/components/mbolo/ErrorNotificationBridge";
 
 // Code splitting: lazy load des pages
 const AuthPage = lazy(() => import("@/components/mbolo/AuthPage"));
@@ -18,7 +20,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60_000, // 1 minute
-      cacheTime: 300_000, // 5 minutes
+      gcTime: 300_000, // 5 minutes
       retry: 1,
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
@@ -33,13 +35,29 @@ const PageLoader = () => (
 );
 
 const App = () => {
-  const [isAuth, setIsAuth] = useState(() => !!localStorage.getItem('token'));
+  const [isAuth, setIsAuth] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    authApi.getCurrentUser()
+      .then((user) => setIsAuth(Boolean(user?.id)))
+      .catch(() => {
+        tokenManager.clearTokens();
+        setIsAuth(false);
+      })
+      .finally(() => setCheckingSession(false));
+  }, []);
+
+  if (checkingSession) {
+    return <PageLoader />;
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
         <Sonner position="top-center" />
+        <ErrorNotificationBridge />
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Suspense fallback={<PageLoader />}>
             <Routes>

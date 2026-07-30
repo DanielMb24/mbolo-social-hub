@@ -321,13 +321,13 @@ const StoriesBar = ({
     );
   }, [externalStory]);
 
-  const openViewer = (index: number) => {
-    const group = groups[index];
+  const openViewer = (group: StoryGroup) => {
     if (group.userId === currentUserId && group.stories.length === 0) {
       onAddStoryClick?.();
       return;
     }
-    setViewerGroupIndex(index);
+    const storyGroups = displayGroups.filter(g => g.stories.length > 0);
+    setViewerGroupIndex(Math.max(0, storyGroups.findIndex(g => g.userId === group.userId)));
     setViewerOpen(true);
   };
 
@@ -359,48 +359,75 @@ const StoriesBar = ({
       <div className="border-b bg-card/50">
         <div
           ref={scrollRef}
-          className="flex gap-4 px-4 py-3 overflow-x-auto scrollbar-hide"
+          className="flex gap-2 px-2 sm:px-0 py-3 overflow-x-auto scrollbar-hide"
           style={{ scrollbarWidth: "none" }}
         >
           {displayGroups.map((group) => {
-            const realIndex = groups.indexOf(group);
             const isMe = group.userId === currentUserId;
             const hasNoStories = group.stories.length === 0;
-            const ringColor = group.allSeen || hasNoStories
-              ? "ring-muted"
-              : "ring-[hsl(var(--primary))]";
+            const firstStory = group.stories[0];
+            const hasImage = firstStory?.mediaType === "image" && firstStory.mediaUrl;
 
             return (
               <button
                 key={group.userId}
-                onClick={() => openViewer(realIndex)}
-                className="flex flex-col items-center gap-1.5 shrink-0 group"
+                onClick={() => openViewer(group)}
+                className="relative h-44 w-[118px] shrink-0 overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md"
               >
-                <div className={`relative w-16 h-16 rounded-full ring-2 ring-offset-2 ring-offset-background ${ringColor} transition-transform group-hover:scale-105`}>
-                  {group.avatarUrl ? (
-                    <img
-                      src={group.avatarUrl}
-                      alt={group.username}
-                      className="w-full h-full rounded-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-full h-full rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-primary-foreground font-bold text-lg">
-                      {group.avatarInitials}
+                {isMe && hasNoStories ? (
+                  <>
+                    <div className="h-[116px] bg-gradient-to-br from-primary/80 to-secondary/80 flex items-center justify-center">
+                      <div className="w-14 h-14 rounded-full bg-background/20 border border-background/40 flex items-center justify-center text-primary-foreground font-bold text-lg">
+                        {currentUserInitials}
+                      </div>
                     </div>
-                  )}
-                  {isMe && (
-                    <div className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-primary border-2 border-background flex items-center justify-center">
-                      <Plus className="w-3 h-3 text-primary-foreground" />
+                    <div className="absolute left-1/2 top-[100px] -translate-x-1/2 w-9 h-9 rounded-full bg-primary border-4 border-card flex items-center justify-center shadow">
+                      <Plus className="w-4 h-4 text-primary-foreground" />
                     </div>
-                  )}
-                  {!isMe && !group.allSeen && group.stories.length > 0 && (
-                    <div className="absolute top-0 right-0 w-3.5 h-3.5 rounded-full bg-destructive border-2 border-background" />
-                  )}
-                </div>
-                <span className="text-xs text-foreground/80 font-medium truncate max-w-[64px] text-center leading-tight">
-                  {isMe ? "Ma story" : group.username.split(" ")[0]}
-                </span>
+                    <div className="absolute bottom-0 left-0 right-0 bg-card px-2 pb-3 pt-7">
+                      <p className="text-xs font-bold text-center text-foreground leading-tight">Créer une story</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {hasImage ? (
+                      <img
+                        src={firstStory.mediaUrl}
+                        alt={group.username}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div
+                        className="absolute inset-0"
+                        style={{ background: firstStory?.backgroundColor || "linear-gradient(135deg, #2563eb 0%, #db2777 100%)" }}
+                      />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/25" />
+                    <div className={`absolute left-2 top-2 w-10 h-10 rounded-full border-4 ${group.allSeen ? "border-white/70" : "border-primary"} bg-card overflow-hidden flex items-center justify-center text-xs font-bold text-foreground`}>
+                      {group.avatarUrl ? (
+                        <img
+                          src={group.avatarUrl}
+                          alt={group.username}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        group.avatarInitials
+                      )}
+                    </div>
+                    {!hasImage && firstStory?.content && (
+                      <div className="absolute inset-x-2 top-16">
+                        <p className="line-clamp-4 text-center text-sm font-bold leading-snug text-white drop-shadow">
+                          {firstStory.content}
+                        </p>
+                      </div>
+                    )}
+                    <p className="absolute bottom-2 left-2 right-2 text-xs font-bold leading-tight text-white drop-shadow line-clamp-2">
+                      {isMe ? "Votre story" : group.username}
+                    </p>
+                  </>
+                )}
               </button>
             );
           })}
@@ -410,7 +437,7 @@ const StoriesBar = ({
       {viewerOpen && (
         <StoryViewer
           groups={displayGroups.filter(g => g.stories.length > 0)}
-          initialGroupIndex={Math.max(0, displayGroups.filter(g => g.stories.length > 0).findIndex(g => g.userId === displayGroups[viewerGroupIndex]?.userId))}
+          initialGroupIndex={viewerGroupIndex}
           onClose={() => setViewerOpen(false)}
           onStorySeen={handleStorySeen}
         />

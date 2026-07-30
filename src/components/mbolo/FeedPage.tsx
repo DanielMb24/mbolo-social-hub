@@ -1,7 +1,8 @@
 import { MessageCircle, Share2, MoreHorizontal, Image, Smile, Bookmark, TrendingUp, ThumbsUp, Trash2, Flag, Link2, Globe, X, Video, MapPin } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { postApi, userApi } from "@/lib/api";
+import { moderationApi, postApi, userApi } from "@/lib/api";
+import { getErrorMessage } from "@/lib/error-notifier";
 import { toast } from "sonner";
 import StoriesBar from "./StoriesBar";
 import StoryCreator from "./StoryCreator";
@@ -49,6 +50,7 @@ const FeedPage = () => {
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const imageUploadRef = useRef<HTMLInputElement>(null);
   const reactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const authorCacheRef = useRef<Map<string, Post["author"]>>(new Map());
   const userId = localStorage.getItem('userId') || '';
   const [username, setUsername] = useState(localStorage.getItem('username') || '');
   const userInitials = username ? username.substring(0, 2).toUpperCase() : 'U';
@@ -78,27 +80,44 @@ const FeedPage = () => {
     try {
       setLoading(true);
       const data = await postApi.getFeed();
-      const postsWithAuthors = await Promise.all(
-        data.map(async (post: any) => {
-          try {
-            const author = await userApi.getProfile(post.authorId);
-            return { ...post, author };
-          } catch {
-            return { 
-              ...post, 
-              author: { 
-                id: post.authorId, 
-                username: getDisplayUsername(undefined, post.authorId), 
-                fullname: getDisplayUsername(undefined, post.authorId)
-              } 
-            };
-          }
-        })
-      );
-      setPosts(postsWithAuthors);
+      const basePosts = data.map((post: any) => ({
+        ...post,
+        likes: Array.isArray(post.likes) ? post.likes : [],
+        author: authorCacheRef.current.get(post.authorId) || {
+          id: post.authorId,
+          username: getDisplayUsername(undefined, post.authorId),
+          fullname: getDisplayUsername(undefined, post.authorId)
+        }
+      }));
+      setPosts(basePosts);
+      setLoading(false);
+
+      const uniqueAuthorIds = [...new Set(data.map((post: any) => post.authorId).filter(Boolean))];
+      const missingAuthorIds = uniqueAuthorIds.filter((authorId) => !authorCacheRef.current.has(authorId));
+
+      if (missingAuthorIds.length > 0) {
+        await Promise.all(
+          missingAuthorIds.map(async (authorId) => {
+            try {
+              const author = await userApi.getProfile(authorId);
+              authorCacheRef.current.set(authorId, author);
+            } catch {
+              authorCacheRef.current.set(authorId, {
+                id: authorId,
+                username: getDisplayUsername(undefined, authorId),
+                fullname: getDisplayUsername(undefined, authorId)
+              });
+            }
+          })
+        );
+
+        setPosts(prev => prev.map(post => ({
+          ...post,
+          author: authorCacheRef.current.get(post.authorId) || post.author
+        })));
+      }
     } catch {
       setPosts([]);
-    } finally {
       setLoading(false);
     }
   };
@@ -124,7 +143,9 @@ const FeedPage = () => {
       loadPosts();
     } catch (error) {
       console.error('Post creation error:', error);
-      toast.error("Impossible de publier le post");
+      toast.error("Impossible de publier le post", {
+        description: getErrorMessage(error, "Réessayez dans quelques instants."),
+      });
     } finally {
       setPosting(false);
     }
@@ -486,7 +507,17 @@ const FeedPage = () => {
                             <Trash2 className="w-4 h-4" /> Supprimer
                           </button>
                         )}
-                        <button onClick={() => { setShowMenu(null); toast.success("Signalement envoyé"); }}
+                        <button onClick={async () => {
+                          setShowMenu(null);
+                          try {
+                            await moderationApi.reportContent(post.id, 'post', 'Publication signalée depuis le fil');
+                            toast.success("Signalement envoyé", { description: "Nous examinerons cette publication." });
+                          } catch (error) {
+                            toast.error("Signalement impossible", {
+                              description: getErrorMessage(error, "Réessayez dans quelques instants."),
+                            });
+                          }
+                        }}
                           className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
                         >
                           <Flag className="w-4 h-4" /> Signaler
