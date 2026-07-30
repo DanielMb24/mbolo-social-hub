@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Plus, X, ChevronLeft, ChevronRight, Volume2, VolumeX, Pause, Play } from "lucide-react";
+import { storyApi } from "@/lib/api";
 
 export interface Story {
   id: string;
@@ -25,113 +26,6 @@ interface StoryGroup {
   stories: Story[];
   allSeen: boolean;
 }
-
-const DEMO_STORY_GROUPS: StoryGroup[] = [
-  {
-    userId: "me",
-    username: "Moi",
-    avatarInitials: "M",
-    allSeen: false,
-    stories: [],
-  },
-  {
-    userId: "u1",
-    username: "Amara K.",
-    avatarInitials: "AK",
-    allSeen: false,
-    stories: [
-      {
-        id: "s1",
-        userId: "u1",
-        username: "Amara K.",
-        avatarInitials: "AK",
-        mediaType: "text",
-        content: "🎉 Grande nouvelle aujourd'hui !",
-        backgroundColor: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        createdAt: new Date(Date.now() - 3600000).toISOString(),
-        expiresAt: new Date(Date.now() + 82800000).toISOString(),
-        seen: false,
-        duration: 5000,
-      },
-      {
-        id: "s2",
-        userId: "u1",
-        username: "Amara K.",
-        avatarInitials: "AK",
-        mediaType: "text",
-        content: "🌟 Gabon c'est beau !",
-        backgroundColor: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
-        createdAt: new Date(Date.now() - 1800000).toISOString(),
-        expiresAt: new Date(Date.now() + 84600000).toISOString(),
-        seen: false,
-        duration: 5000,
-      },
-    ],
-  },
-  {
-    userId: "u2",
-    username: "Brice M.",
-    avatarInitials: "BM",
-    allSeen: true,
-    stories: [
-      {
-        id: "s3",
-        userId: "u2",
-        username: "Brice M.",
-        avatarInitials: "BM",
-        mediaType: "text",
-        content: "💪 Motivation du matin !",
-        backgroundColor: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
-        createdAt: new Date(Date.now() - 7200000).toISOString(),
-        expiresAt: new Date(Date.now() + 79200000).toISOString(),
-        seen: true,
-        duration: 5000,
-      },
-    ],
-  },
-  {
-    userId: "u3",
-    username: "Cécile N.",
-    avatarInitials: "CN",
-    allSeen: false,
-    stories: [
-      {
-        id: "s4",
-        userId: "u3",
-        username: "Cécile N.",
-        avatarInitials: "CN",
-        mediaType: "text",
-        content: "🍃 Bonne journée à tous !",
-        backgroundColor: "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
-        createdAt: new Date(Date.now() - 900000).toISOString(),
-        expiresAt: new Date(Date.now() + 85500000).toISOString(),
-        seen: false,
-        duration: 5000,
-      },
-    ],
-  },
-  {
-    userId: "u4",
-    username: "David O.",
-    avatarInitials: "DO",
-    allSeen: false,
-    stories: [
-      {
-        id: "s5",
-        userId: "u4",
-        username: "David O.",
-        avatarInitials: "DO",
-        mediaType: "text",
-        content: "🏙️ Libreville by night 🌙",
-        backgroundColor: "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
-        createdAt: new Date(Date.now() - 5400000).toISOString(),
-        expiresAt: new Date(Date.now() + 81000000).toISOString(),
-        seen: false,
-        duration: 5000,
-      },
-    ],
-  },
-];
 
 // ─────────────────────────── STORY VIEWER ────────────────────────────────────
 
@@ -370,17 +264,57 @@ const StoriesBar = ({
   onAddStoryClick,
   externalStory,
 }: StoriesBarProps) => {
-  const [groups, setGroups] = useState<StoryGroup[]>(DEMO_STORY_GROUPS);
+  const [groups, setGroups] = useState<StoryGroup[]>([]);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerGroupIndex, setViewerGroupIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const loadStories = async () => {
+      const rows = await storyApi.getStories();
+      const grouped = new Map<string, StoryGroup>();
+      grouped.set(currentUserId, {
+        userId: currentUserId,
+        username: currentUsername,
+        avatarInitials: currentUserInitials,
+        allSeen: false,
+        stories: [],
+      });
+
+      rows.forEach((story) => {
+        const group = grouped.get(story.userId) || {
+          userId: story.userId,
+          username: story.username || story.userId.slice(0, 8),
+          avatarUrl: story.avatarUrl,
+          avatarInitials: story.avatarInitials || story.userId.slice(0, 2).toUpperCase(),
+          stories: [],
+          allSeen: true,
+        };
+        group.stories.push(story);
+        group.allSeen = group.stories.every(s => s.seen);
+        grouped.set(story.userId, group);
+      });
+
+      setGroups(Array.from(grouped.values()));
+    };
+
+    loadStories().catch(() => {
+      setGroups([{
+        userId: currentUserId,
+        username: currentUsername,
+        avatarInitials: currentUserInitials,
+        allSeen: false,
+        stories: [],
+      }]);
+    });
+  }, [currentUserId, currentUsername, currentUserInitials]);
 
   // Inject external story created via StoryCreator
   useEffect(() => {
     if (!externalStory) return;
     setGroups(prev =>
       prev.map(g =>
-        g.userId === "me"
+        g.userId === currentUserId
           ? { ...g, stories: [externalStory, ...g.stories], allSeen: false }
           : g
       )
@@ -389,7 +323,7 @@ const StoriesBar = ({
 
   const openViewer = (index: number) => {
     const group = groups[index];
-    if (group.userId === "me" && group.stories.length === 0) {
+    if (group.userId === currentUserId && group.stories.length === 0) {
       onAddStoryClick?.();
       return;
     }
@@ -398,6 +332,7 @@ const StoriesBar = ({
   };
 
   const handleStorySeen = (storyId: string) => {
+    storyApi.markSeen(storyId).catch(() => undefined);
     setGroups(prev =>
       prev.map(g => ({
         ...g,
@@ -409,7 +344,13 @@ const StoriesBar = ({
 
   // Always show "me" slot, plus non-empty groups
   const displayGroups = [
-    groups[0],
+    groups[0] || {
+      userId: currentUserId,
+      username: currentUsername,
+      avatarInitials: currentUserInitials,
+      allSeen: false,
+      stories: [],
+    },
     ...groups.slice(1).filter(g => g.stories.length > 0),
   ];
 
@@ -423,7 +364,7 @@ const StoriesBar = ({
         >
           {displayGroups.map((group) => {
             const realIndex = groups.indexOf(group);
-            const isMe = group.userId === "me";
+            const isMe = group.userId === currentUserId;
             const hasNoStories = group.stories.length === 0;
             const ringColor = group.allSeen || hasNoStories
               ? "ring-muted"

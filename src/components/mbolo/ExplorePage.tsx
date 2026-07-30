@@ -1,30 +1,14 @@
-import { Search, TrendingUp, Hash, UserPlus, Grid3X3, Heart, MessageCircle, Play } from "lucide-react";
+import { Search, TrendingUp, Hash, UserPlus, Grid3X3, Heart, MessageCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { postApi, userApi, videoApi } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-const TRENDING_TAGS = [
-  { tag: '#MBolo', posts: '2.4k' },
-  { tag: '#Gabon', posts: '1.8k' },
-  { tag: '#Libreville', posts: '1.2k' },
-  { tag: '#Musique', posts: '956' },
-  { tag: '#Culture', posts: '823' },
-  { tag: '#Sport', posts: '654' },
-  { tag: '#Food', posts: '432' },
-  { tag: '#Danse', posts: '321' },
-];
-
-const SUGGESTED_USERS = [
-  { id: '1', username: 'flavy_m', fullname: 'Flavy Moukagny', bio: 'Artiste & créatrice' },
-  { id: '2', username: 'roro_ndg', fullname: 'Roro Ndg', bio: 'Photographe' },
-  { id: '3', username: 'oriana_k', fullname: 'Oriana Krm', bio: 'Influenceuse lifestyle' },
-];
-
 const ExplorePage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<'discover' | 'trending' | 'people'>('discover');
   const [posts, setPosts] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
@@ -33,103 +17,30 @@ const ExplorePage = () => {
     loadPosts();
   }, []);
 
-  const loadPosts = async () => {
-    // Posts de démonstration par défaut
-    const demoPosts = [
-      {
-        id: 'demo-1',
-        content: 'Bienvenue sur MBolo ! 🎉 Découvrez les tendances au Gabon',
-        likes: ['demo'],
-        commentsCount: 12,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-2',
-        content: 'Libreville by night 🌃 #Gabon #Libreville',
-        likes: [],
-        commentsCount: 8,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-3',
-        content: 'La culture gabonaise est riche et diversifiée 🇬🇦',
-        likes: [],
-        commentsCount: 15,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-4',
-        content: 'Musique gabonaise 🎵 #MBolo #Musique',
-        likes: [],
-        commentsCount: 5,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-5',
-        content: 'Sport et passion ⚽ #Sport #Gabon',
-        likes: [],
-        commentsCount: 20,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-6',
-        content: 'Cuisine traditionnelle gabonaise 🍲',
-        likes: [],
-        commentsCount: 18,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-7',
-        content: 'Mode africaine et créateurs locaux 👗',
-        likes: [],
-        commentsCount: 9,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-8',
-        content: 'Innovation technologique au Gabon 💻',
-        likes: [],
-        commentsCount: 14,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-9',
-        content: 'Nature et biodiversité gabonaise 🌴',
-        likes: [],
-        commentsCount: 22,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-10',
-        content: 'Art contemporain gabonais 🎨',
-        likes: [],
-        commentsCount: 11,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-11',
-        content: 'Entrepreneuriat au Gabon 💼',
-        likes: [],
-        commentsCount: 16,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-12',
-        content: 'Tourisme et découverte 🏖️',
-        likes: [],
-        commentsCount: 19,
-        createdAt: new Date().toISOString()
-      }
-    ];
+  const trendingTags = Array.from(
+    posts.reduce((map, post) => {
+      String(post.content || '').match(/#[\wÀ-ÿ]+/g)?.forEach((tag) => {
+        const normalized = tag.toLowerCase();
+        map.set(normalized, (map.get(normalized) || 0) + 1);
+      });
+      return map;
+    }, new Map<string, number>())
+  )
+    .map(([tag, count]) => ({ tag, posts: `${count} publication${count > 1 ? 's' : ''}` }))
+    .sort((a, b) => Number(b.posts.split(' ')[0]) - Number(a.posts.split(' ')[0]));
 
+  const loadPosts = async () => {
     try {
       setLoading(true);
-      const data = await postApi.getFeed(0, 30);
-      // Si on a des posts réels, les afficher, sinon afficher les démos
-      setPosts(data && data.length > 0 ? data : demoPosts);
+      const [data, userRows] = await Promise.all([
+        postApi.getFeed(0, 30),
+        userApi.searchUsers(""),
+      ]);
+      setPosts(Array.isArray(data) ? data : []);
+      setUsers(userRows);
     } catch {
-      // En cas d'erreur, afficher les posts de démonstration
-      setPosts(demoPosts);
+      setPosts([]);
+      setUsers([]);
     } finally {
       setLoading(false);
     }
@@ -222,7 +133,9 @@ const ExplorePage = () => {
         {activeTab === 'trending' && (
           <div className="p-4 space-y-3">
             <h3 className="font-bold text-foreground text-lg mb-4">🔥 Hashtags tendances</h3>
-            {TRENDING_TAGS.map((item, idx) => (
+            {trendingTags.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Aucun hashtag pour le moment</div>
+            ) : trendingTags.map((item, idx) => (
               <div key={item.tag} className="flex items-center gap-4 p-3 rounded-xl hover:bg-muted transition-colors cursor-pointer">
                 <span className="text-lg font-bold text-muted-foreground w-8">{idx + 1}</span>
                 <div className="flex-1">
@@ -241,7 +154,9 @@ const ExplorePage = () => {
         {activeTab === 'people' && (
           <div className="p-4 space-y-3">
             <h3 className="font-bold text-foreground text-lg mb-4">Suggestions pour toi</h3>
-            {SUGGESTED_USERS.map(user => (
+            {users.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Aucun utilisateur à suggérer</div>
+            ) : users.map(user => (
               <div key={user.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-muted transition-colors">
                 <div className="w-12 h-12 rounded-full bg-secondary/20 flex items-center justify-center text-secondary font-bold">
                   {user.username.substring(0, 2).toUpperCase()}

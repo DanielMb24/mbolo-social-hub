@@ -112,20 +112,14 @@ const FeedPage = () => {
     if (!postRateLimit.check()) return;
     setPosting(true);
     try {
-      // Pour l'instant, créer le post sans image (le backend ne supporte pas encore multipart/form-data)
-      // TODO: Implémenter l'upload d'image séparé quand le backend sera prêt
-      await postApi.createPost({ content: newPost });
+      await postApi.createPost({ content: newPost }, selectedImageFile ? [selectedImageFile] : undefined);
       
       setNewPost("");
       setPreviewImage(null);
       setSelectedImageFile(null);
       setShowPostComposer(false);
       
-      if (selectedImageFile) {
-        toast.success("Post publié (image non supportée pour l'instant)");
-      } else {
-        toast.success("Post publié avec succès");
-      }
+      toast.success("Post publié avec succès");
       
       loadPosts();
     } catch (error) {

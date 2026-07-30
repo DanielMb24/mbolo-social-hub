@@ -17,6 +17,14 @@ const unwrapApiData = <T>(response: unknown, fallback: T): T => {
   return (response ?? fallback) as T;
 };
 
+const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error("Impossible de lire le fichier"));
+    reader.readAsDataURL(file);
+  });
+
 export interface AuthResponse {
   success: boolean;
   accessToken: string;
@@ -247,16 +255,7 @@ class ApiClient {
 
   async uploadFile(endpoint: string, file: File, additionalData?: Record<string, string>): Promise<any> {
     const token = tokenManager.getAccessToken();
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    if (additionalData) {
-      Object.entries(additionalData).forEach(([key, value]) => {
-        formData.append(key, value);
-      });
-    }
-
-    const headers: HeadersInit = {};
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -264,7 +263,13 @@ class ApiClient {
     const response = await fetch(`${this.baseURL}${endpoint}`, {
       method: 'POST',
       headers,
-      body: formData,
+      body: JSON.stringify({
+        ...additionalData,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        fileData: await fileToDataUrl(file),
+      }),
     });
 
     return this.handleResponse(response);
@@ -401,16 +406,83 @@ export const postApi = {
     api.delete(`/api/posts/${postId}/comments/${commentId}`),
 };
 
+export interface StoryRecord {
+  id: string;
+  userId: string;
+  username: string;
+  avatarUrl?: string;
+  avatarInitials: string;
+  mediaUrl?: string;
+  mediaType: "image" | "video" | "text";
+  content?: string;
+  backgroundColor?: string;
+  createdAt: string;
+  expiresAt: string;
+  seen: boolean;
+  duration?: number;
+  views?: number;
+}
+
+export const storyApi = {
+  getStories: async () => {
+    const response = await api.get<ApiResponse<StoryRecord[]> | StoryRecord[]>('/api/stories');
+    return unwrapApiData<StoryRecord[]>(response, []);
+  },
+  getMyStories: async () => {
+    const response = await api.get<ApiResponse<StoryRecord[]> | StoryRecord[]>('/api/stories/me');
+    return unwrapApiData<StoryRecord[]>(response, []);
+  },
+  createStory: async (story: Partial<StoryRecord>, file?: File) => {
+    const response = file
+      ? await api.uploadFile('/api/stories', file, {
+          mediaType: story.mediaType || 'image',
+          content: story.content || '',
+          backgroundColor: story.backgroundColor || '',
+          username: story.username || '',
+          avatarInitials: story.avatarInitials || '',
+        })
+      : await api.post<ApiResponse<StoryRecord> | StoryRecord>('/api/stories', story);
+    return unwrapApiData<StoryRecord>(response, response as StoryRecord);
+  },
+  deleteStory: (storyId: string) => api.delete(`/api/stories/${storyId}`),
+  markSeen: (storyId: string) => api.post(`/api/stories/${storyId}/seen`),
+};
+
+export interface AppNotificationRecord {
+  id: string;
+  type: "message" | "like" | "comment" | "story" | "follow";
+  title: string;
+  body: string;
+  avatar?: string;
+  avatarInitials: string;
+  read: boolean;
+  createdAt: string;
+}
+
+export const notificationApi = {
+  getNotifications: async () => {
+    const response = await api.get<ApiResponse<AppNotificationRecord[]> | AppNotificationRecord[]>('/api/notifications');
+    return unwrapApiData<AppNotificationRecord[]>(response, []);
+  },
+  markRead: (id: string) => api.post(`/api/notifications/${id}/read`),
+  markAllRead: () => api.post('/api/notifications/read-all'),
+  dismiss: (id: string) => api.delete(`/api/notifications/${id}`),
+};
+
 // Video API
 export const videoApi = {
-  getVideos: (page = 0, size = 20) => 
-    api.get<Video[]>(`/api/videos?page=${page}&size=${size}`),
+  getVideos: async (page = 0, size = 20) => {
+    const response = await api.get<ApiResponse<Video[]> | Video[]>(`/api/videos?page=${page}&size=${size}`);
+    return unwrapApiData<Video[]>(response, []);
+  },
   
   getVideo: (videoId: string) => 
     api.get<Video>(`/api/videos/${videoId}`),
   
-  uploadVideo: (file: File, title: string, description?: string) => 
-    api.uploadFile('/api/videos', file, { title, description: description || '' }),
+  uploadVideo: async (file: File, title: string, description?: string) => {
+    const response = await api.uploadFile('/api/videos', file, { title, description: description || '' });
+    return unwrapApiData<Video>(response, response);
+  },
   
   deleteVideo: (videoId: string) => 
     api.delete(`/api/videos/${videoId}`),

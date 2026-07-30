@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Bell, Heart, MessageCircle, Film, Check, X } from "lucide-react";
+import { notificationApi } from "@/lib/api";
 
 export interface AppNotification {
   id: string;
@@ -11,54 +12,6 @@ export interface AppNotification {
   read: boolean;
   createdAt: string;
 }
-
-const DEMO_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: "n1",
-    type: "message",
-    title: "Amara K.",
-    body: "T'as vu la nouvelle ? 🔥",
-    avatarInitials: "AK",
-    read: false,
-    createdAt: new Date(Date.now() - 120000).toISOString(),
-  },
-  {
-    id: "n2",
-    type: "like",
-    title: "Brice M. a aimé ton post",
-    body: "« Libreville est magnifique... »",
-    avatarInitials: "BM",
-    read: false,
-    createdAt: new Date(Date.now() - 600000).toISOString(),
-  },
-  {
-    id: "n3",
-    type: "comment",
-    title: "Cécile N. a commenté",
-    body: "Trop vrai ! 🙌",
-    avatarInitials: "CN",
-    read: false,
-    createdAt: new Date(Date.now() - 1800000).toISOString(),
-  },
-  {
-    id: "n4",
-    type: "story",
-    title: "David O. a publié une story",
-    body: "Nouvelle story disponible",
-    avatarInitials: "DO",
-    read: true,
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: "n5",
-    type: "follow",
-    title: "Fatou B. vous suit maintenant",
-    body: "Découvrez son profil",
-    avatarInitials: "FB",
-    read: true,
-    createdAt: new Date(Date.now() - 7200000).toISOString(),
-  },
-];
 
 const timeAgo = (iso: string) => {
   const diff = Date.now() - new Date(iso).getTime();
@@ -86,22 +39,33 @@ interface NotificationPanelProps {
 }
 
 const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
-  const [notifications, setNotifications] = useState<AppNotification[]>(DEMO_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [loading, setLoading] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAllRead = () => {
+  const markAllRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    await notificationApi.markAllRead().catch(() => undefined);
   };
 
-  const markRead = (id: string) => {
+  const markRead = async (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    await notificationApi.markRead(id).catch(() => undefined);
   };
 
-  const dismiss = (id: string) => {
+  const dismiss = async (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
+    await notificationApi.dismiss(id).catch(() => undefined);
   };
+
+  useEffect(() => {
+    notificationApi.getNotifications()
+      .then(setNotifications)
+      .catch(() => setNotifications([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   // Fermer en cliquant hors du panneau
   useEffect(() => {
@@ -146,7 +110,12 @@ const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
 
       {/* List */}
       <div className="max-h-96 overflow-y-auto divide-y divide-border">
-        {notifications.length === 0 ? (
+        {loading ? (
+          <div className="py-12 text-center">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">Chargement...</p>
+          </div>
+        ) : notifications.length === 0 ? (
           <div className="py-12 text-center">
             <Bell className="w-10 h-10 text-muted-foreground mx-auto mb-3 opacity-50" />
             <p className="text-sm text-muted-foreground">Aucune notification</p>

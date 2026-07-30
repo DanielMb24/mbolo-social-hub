@@ -17,99 +17,12 @@ const VideoPage = () => {
   useEffect(() => { loadVideos(); }, []);
 
   const loadVideos = async () => {
-    // Vidéos de démonstration par défaut
-    const demoVideos = [
-      {
-        id: 'demo-1',
-        title: 'Bienvenue sur MBolo Vidéos 🎬',
-        description: 'Découvrez les vidéos tendances au Gabon 🇬🇦',
-        userId: 'mbolo',
-        views: 12500,
-        likes: ['demo'],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-2',
-        title: 'Danse traditionnelle gabonaise 💃',
-        description: 'Culture et tradition #Gabon #Culture',
-        userId: 'culture_ga',
-        views: 8900,
-        likes: [],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-3',
-        title: 'Cuisine gabonaise 🍗',
-        description: 'Recette du poulet Nyembwe',
-        userId: 'chef_lbv',
-        views: 15200,
-        likes: [],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-4',
-        title: 'Musique gabonaise 🎵',
-        description: 'Les meilleurs artistes du moment',
-        userId: 'music_241',
-        views: 23400,
-        likes: [],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-5',
-        title: 'Libreville by night 🌃',
-        description: 'Découvrez la capitale gabonaise',
-        userId: 'travel_ga',
-        views: 18700,
-        likes: [],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-6',
-        title: 'Sport au Gabon ⚽',
-        description: 'Football et passion #Sport',
-        userId: 'sport_ga',
-        views: 11200,
-        likes: [],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-7',
-        title: 'Mode africaine 👗',
-        description: 'Créateurs gabonais #Fashion',
-        userId: 'fashion_lbv',
-        views: 9800,
-        likes: [],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-8',
-        title: 'Tech & Innovation 💻',
-        description: 'Startups gabonaises qui innovent',
-        userId: 'tech_ga',
-        views: 7600,
-        likes: [],
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'demo-9',
-        title: 'Nature gabonaise 🌴',
-        description: 'Forêts et biodiversité',
-        userId: 'nature_ga',
-        views: 14300,
-        likes: [],
-        createdAt: new Date().toISOString()
-      }
-    ];
-
     try {
       setLoading(true);
       const data = await videoApi.getVideos();
-      // Si on a des vidéos réelles, les afficher, sinon afficher les démos
-      setVideos(data && data.length > 0 ? data : demoVideos);
+      setVideos(Array.isArray(data) ? data : []);
     } catch {
-      // En cas d'erreur, afficher les vidéos de démonstration
-      setVideos(demoVideos);
+      setVideos([]);
     } finally {
       setLoading(false);
     }

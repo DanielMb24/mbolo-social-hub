@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, User, FileText, MessageCircle, X, Loader2 } from "lucide-react";
+import { chatApi, postApi, userApi } from "@/lib/api";
 
 interface SearchResult {
   id: string;
@@ -9,27 +10,47 @@ interface SearchResult {
   avatarInitials: string;
 }
 
-// Demo search function (replace with real API calls)
 const searchAll = async (query: string): Promise<SearchResult[]> => {
-  await new Promise(r => setTimeout(r, 200));
   if (!query.trim()) return [];
 
   const q = query.toLowerCase();
-  const demoData: SearchResult[] = [
-    { id: "u1", type: "user", title: "Amara Koumba", subtitle: "@amara.k · Libreville", avatarInitials: "AK" },
-    { id: "u2", type: "user", title: "Brice Moussavou", subtitle: "@brice.m · Port-Gentil", avatarInitials: "BM" },
-    { id: "u3", type: "user", title: "Cécile Ntoumi", subtitle: "@cecile.n · Franceville", avatarInitials: "CN" },
-    { id: "u4", type: "user", title: "David Ondo", subtitle: "@david.o · Libreville", avatarInitials: "DO" },
-    { id: "p1", type: "post", title: "Libreville by night 🌙", subtitle: "David Ondo · 5h", avatarInitials: "DO" },
-    { id: "p2", type: "post", title: "Grande nouvelle aujourd'hui !", subtitle: "Amara K. · 1j", avatarInitials: "AK" },
-    { id: "c1", type: "conversation", title: "Conversation avec Amara", subtitle: "Dernier message il y a 2h", avatarInitials: "AK" },
-  ];
+  const [users, posts, conversations] = await Promise.all([
+    userApi.searchUsers(query).catch(() => []),
+    postApi.getFeed(0, 50).catch(() => []),
+    chatApi.getConversations().catch(() => []),
+  ]);
 
-  return demoData.filter(
-    item =>
-      item.title.toLowerCase().includes(q) ||
-      (item.subtitle && item.subtitle.toLowerCase().includes(q))
-  );
+  const userResults = users.map((user: any) => ({
+    id: user.id,
+    type: "user" as const,
+    title: user.fullname || user.username || "Utilisateur",
+    subtitle: `@${user.username || user.id.slice(0, 8)}${user.location ? ` · ${user.location}` : ''}`,
+    avatarInitials: (user.username || user.id || "U").slice(0, 2).toUpperCase(),
+  }));
+
+  const postResults = posts
+    .filter((post: any) => String(post.content || '').toLowerCase().includes(q))
+    .slice(0, 10)
+    .map((post: any) => ({
+      id: post.id,
+      type: "post" as const,
+      title: String(post.content || "Publication").slice(0, 80),
+      subtitle: new Date(post.createdAt).toLocaleDateString('fr-FR'),
+      avatarInitials: String(post.authorId || "U").slice(0, 2).toUpperCase(),
+    }));
+
+  const conversationResults = conversations
+    .filter((conversation: any) => String(conversation.lastMessage || conversation.groupName || '').toLowerCase().includes(q))
+    .slice(0, 5)
+    .map((conversation: any) => ({
+      id: conversation.id,
+      type: "conversation" as const,
+      title: conversation.groupName || "Conversation",
+      subtitle: conversation.lastMessage || "Discussion",
+      avatarInitials: String(conversation.groupName || conversation.id || "C").slice(0, 2).toUpperCase(),
+    }));
+
+  return [...userResults, ...postResults, ...conversationResults];
 };
 
 const iconForType = (type: SearchResult["type"]) => {
@@ -185,22 +206,9 @@ const GlobalSearch = ({ onClose }: GlobalSearchProps) => {
             </div>
           )}
 
-          {/* Empty state / suggestions */}
           {!query && (
             <div className="px-4 py-6">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Suggestions</p>
-              <div className="space-y-1">
-                {["Amara Koumba", "Libreville", "Brice M."].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => handleChange(s)}
-                    className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl hover:bg-muted transition-colors text-left"
-                  >
-                    <Search className="w-4 h-4 text-muted-foreground shrink-0" />
-                    <span className="text-sm text-foreground">{s}</span>
-                  </button>
-                ))}
-              </div>
+              <p className="text-sm text-muted-foreground text-center">Tapez pour rechercher dans vos utilisateurs, publications et conversations.</p>
             </div>
           )}
         </div>

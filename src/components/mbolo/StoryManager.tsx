@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, Trash2, Eye, Clock, Image as ImageIcon, Type, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { videoApi } from "@/lib/api";
+import { storyApi } from "@/lib/api";
 import type { Story } from "./StoriesBar";
 import StoryCreator from "./StoryCreator";
 
@@ -33,33 +33,7 @@ const StoryManager = ({
   const loadMyStories = async () => {
     setLoading(true);
     try {
-      const result = await videoApi.getVideos(0, 50);
-      // Gérer différents formats de réponse
-      let videos: any[] = [];
-      if (Array.isArray(result)) {
-        videos = result;
-      } else if (result && typeof result === 'object') {
-        const data = result as any;
-        if (Array.isArray(data.content)) videos = data.content;
-        else if (Array.isArray(data.data)) videos = data.data;
-      }
-      
-      // Filtrer les vidéos de l'utilisateur actuel et les convertir en stories
-      const userVideos = videos.filter((v: any) => v.userId === currentUserId);
-      const stories: Story[] = userVideos.map((v: any) => ({
-        id: v.id,
-        userId: v.userId,
-        username: currentUsername,
-        userInitials: currentUserInitials,
-        mediaType: "image" as const,
-        mediaUrl: v.thumbnailUrl || v.videoUrl,
-        content: v.title || v.description || "",
-        backgroundColor: "#3b82f6",
-        createdAt: v.createdAt,
-        expiresAt: new Date(new Date(v.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
-        views: v.views || 0,
-        hasViewed: false
-      }));
+      const stories = await storyApi.getMyStories();
       setMyStories(stories);
     } catch (error) {
       console.error("Erreur chargement stories:", error);
@@ -79,9 +53,9 @@ const StoryManager = ({
   const handleDeleteStory = async (storyId: string) => {
     if (!confirm("Supprimer cette story ?")) return;
     
-    setDeletingId(storyId);
+      setDeletingId(storyId);
     try {
-      await videoApi.deleteVideo(storyId);
+      await storyApi.deleteStory(storyId);
       const updatedStories = myStories.filter(s => s.id !== storyId);
       setMyStories(updatedStories);
       onStoryDeleted?.(storyId);

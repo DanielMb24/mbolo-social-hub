@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { X, Image, Type, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import { storyApi } from "@/lib/api";
 import type { Story } from "./StoriesBar";
 
 const GRADIENT_PRESETS = [
@@ -41,6 +42,7 @@ const StoryCreator = ({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [gradientPage, setGradientPage] = useState(0);
+  const [publishing, setPublishing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const PRESETS_PER_PAGE = 6;
 
@@ -63,7 +65,7 @@ const StoryCreator = ({
     reader.readAsDataURL(file);
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (mode === "text" && !textContent.trim()) {
       toast.error("Écris quelque chose pour ta story !");
       return;
@@ -73,24 +75,29 @@ const StoryCreator = ({
       return;
     }
 
-    const newStory: Story = {
-      id: `story-${Date.now()}`,
-      userId: currentUserId,
-      username: currentUsername,
-      avatarInitials: currentUserInitials,
-      mediaType: mode,
-      content: mode === "text" ? textContent.trim() : undefined,
-      backgroundColor: mode === "text" ? selectedGradient : undefined,
-      mediaUrl: mode === "image" ? imagePreview! : undefined,
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 86400000).toISOString(),
-      seen: false,
-      duration: 5000,
-    };
+    setPublishing(true);
+    try {
+      const newStory = await storyApi.createStory({
+        userId: currentUserId,
+        username: currentUsername,
+        avatarInitials: currentUserInitials,
+        mediaType: mode,
+        content: mode === "text" ? textContent.trim() : undefined,
+        backgroundColor: mode === "text" ? selectedGradient : undefined,
+      }, mode === "image" ? imageFile || undefined : undefined);
 
-    onStoryCreated(newStory);
-    toast.success("Story publiée !");
-    onClose();
+      onStoryCreated({
+        ...newStory,
+        username: newStory.username || currentUsername,
+        avatarInitials: newStory.avatarInitials || currentUserInitials,
+      });
+      toast.success("Story publiée !");
+      onClose();
+    } catch (error: any) {
+      toast.error(error.message || "Impossible de publier la story");
+    } finally {
+      setPublishing(false);
+    }
   };
 
   return (
@@ -250,10 +257,11 @@ const StoryCreator = ({
         <div className="p-4 border-t">
           <button
             onClick={handlePublish}
-            className="btn-gradient-orange w-full flex items-center justify-center gap-2"
+            disabled={publishing}
+            className="btn-gradient-orange w-full flex items-center justify-center gap-2 disabled:opacity-60"
           >
             <span className="text-lg">🔥</span>
-            <span className="font-extrabold">Publier la story</span>
+            <span className="font-extrabold">{publishing ? "Publication..." : "Publier la story"}</span>
           </button>
         </div>
       </div>

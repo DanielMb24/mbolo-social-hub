@@ -15,6 +15,7 @@ import {
   verifyPassword,
   verifyToken,
 } from "./_lib.js";
+import { isCloudinaryConfigured, uploadToCloudinary } from "./_cloudinary.js";
 
 export default async function handler(req, res) {
   try {
@@ -34,6 +35,8 @@ export default async function handler(req, res) {
     if (parts[0] === "auth") return authRoutes(req, res, parts.slice(1));
     if (parts[0] === "users") return userRoutes(req, res, parts.slice(1));
     if (parts[0] === "posts") return postRoutes(req, res, parts.slice(1));
+    if (parts[0] === "stories") return storyRoutes(req, res, parts.slice(1));
+    if (parts[0] === "notifications") return notificationRoutes(req, res, parts.slice(1));
     if (parts[0] === "videos") return videoRoutes(req, res, parts.slice(1));
     if (parts[0] === "chat") return chatRoutes(req, res, parts.slice(1));
     if (parts[0] === "moderation") return moderationRoutes(req, res, parts.slice(1));
@@ -178,6 +181,12 @@ async function userRoutes(req, res, parts) {
     const targetId = parts[0];
     if (req.method === "POST") {
       await follows.updateOne({ followerId: userId, followingId: targetId }, { $setOnInsert: { createdAt: new Date().toISOString() } }, { upsert: true });
+      await createNotification(database, targetId, {
+        type: "follow",
+        title: "Nouvel abonné",
+        body: "Quelqu'un vous suit maintenant",
+        actorId: userId,
+      });
     } else {
       await follows.deleteOne({ followerId: userId, followingId: targetId });
     }
@@ -205,7 +214,21 @@ async function userRoutes(req, res, parts) {
   }
 
   if (req.method === "POST" && (parts[1] === "avatar" || parts[1] === "cover")) {
-    return json(res, 200, ok({ url: "/placeholder.svg", message: "Upload fichier à connecter à un stockage externe." }));
+    if (!userId || userId !== parts[0]) return json(res, 401, error("Non authentifié"));
+    const body = await readBody(req);
+    if (!String(body.fileData || "").startsWith("data:image/")) {
+      return json(res, 400, error("Image invalide"));
+    }
+    if (Number(body.fileSize || 0) > 5 * 1024 * 1024) {
+      return json(res, 413, error("Image trop lourde"));
+    }
+    const field = parts[1] === "avatar" ? "avatarUrl" : "coverUrl";
+    const uploaded = await saveMedia(body.fileData, `mbolo/profiles/${parts[1]}`);
+    await users.updateOne(
+      { _id: makeId(parts[0]) },
+      { $set: { [field]: uploaded.url, [`${field}PublicId`]: uploaded.publicId || "", updatedAt: new Date().toISOString() } }
+    );
+    return json(res, 200, ok(uploaded));
   }
 
   return json(res, 404, error("Endpoint users introuvable"));
@@ -229,17 +252,29 @@ async function postRoutes(req, res, parts) {
   if (req.method === "POST" && !parts[0]) {
     if (!userId) return json(res, 401, error("Non authentifié"));
     const body = await readBody(req);
+    if (Number(body.fileSize || 0) > 5 * 1024 * 1024) return json(res, 413, error("Image trop lourde"));
+    const uploaded = String(body.fileData || "").startsWith("data:image/")
+      ? await saveMedia(body.fileData, "mbolo/posts")
+      : null;
+    const mediaUrls = uploaded ? [uploaded.url] : [];
     const now = new Date().toISOString();
     const result = await posts.insertOne({
       authorId: userId,
       content: body.content || "",
-      mediaUrls: [],
+      mediaUrls,
+      mediaPublicIds: uploaded?.publicId ? [uploaded.publicId] : [],
       likes: [],
       commentsCount: 0,
       createdAt: now,
       updatedAt: now,
     });
     const post = await posts.findOne({ _id: result.insertedId });
+    await createNotification(database, userId, {
+      type: "post",
+      title: "Publication créée",
+      body: "Votre publication est en ligne",
+      actorId: userId,
+    });
     return json(res, 200, normalizeDoc(post));
   }
 
@@ -261,6 +296,15 @@ async function postRoutes(req, res, parts) {
     likes.has(userId) ? likes.delete(userId) : likes.add(userId);
     await posts.updateOne({ _id: makeId(parts[0]) }, { $set: { likes: [...likes], updatedAt: new Date().toISOString() } });
     const updated = await posts.findOne({ _id: makeId(parts[0]) });
+    if (updated?.authorId && updated.authorId !== userId && likes.has(userId)) {
+      await createNotification(database, updated.authorId, {
+        type: "like",
+        title: "Votre publication a reçu une réaction",
+        body: "Quelqu'un a aimé votre publication",
+        actorId: userId,
+        entityId: parts[0],
+      });
+    }
     return json(res, 200, ok(normalizeDoc(updated)));
   }
 
@@ -281,10 +325,117 @@ async function postRoutes(req, res, parts) {
     const result = await comments.insertOne({ postId: parts[0], authorId: userId, content: body.content || "", createdAt: now });
     await posts.updateOne({ _id: makeId(parts[0]) }, { $inc: { commentsCount: 1 } });
     const comment = await comments.findOne({ _id: result.insertedId });
+    const post = await posts.findOne({ _id: makeId(parts[0]) });
+    if (post?.authorId && post.authorId !== userId) {
+      await createNotification(database, post.authorId, {
+        type: "comment",
+        title: "Nouveau commentaire",
+        body: body.content || "Quelqu'un a commenté votre publication",
+        actorId: userId,
+        entityId: parts[0],
+      });
+    }
     return json(res, 200, ok(normalizeDoc(comment)));
   }
 
   return json(res, 404, error("Endpoint posts introuvable"));
+}
+
+async function storyRoutes(req, res, parts) {
+  const database = await serviceDb("post");
+  const stories = database.collection("stories");
+  const userId = currentUserId(req);
+  const now = new Date();
+
+  if (req.method === "GET" && !parts[0]) {
+    const rows = await stories.find({ expiresAt: { $gt: now.toISOString() } }).sort({ createdAt: -1 }).limit(100).toArray();
+    return json(res, 200, ok(rows.map(normalizeDoc)));
+  }
+
+  if (req.method === "GET" && parts[0] === "me") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const rows = await stories.find({ userId, expiresAt: { $gt: now.toISOString() } }).sort({ createdAt: -1 }).toArray();
+    return json(res, 200, ok(rows.map(normalizeDoc)));
+  }
+
+  if (req.method === "POST" && !parts[0]) {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const body = await readBody(req);
+    if (Number(body.fileSize || 0) > 5 * 1024 * 1024) return json(res, 413, error("Image trop lourde"));
+    const mediaType = body.mediaType === "image" || body.fileData ? "image" : "text";
+    const uploaded = mediaType === "image" && body.fileData
+      ? await saveMedia(body.fileData, "mbolo/stories")
+      : null;
+    const doc = {
+      userId,
+      username: body.username || "",
+      avatarInitials: body.avatarInitials || "U",
+      mediaType,
+      mediaUrl: uploaded?.url || "",
+      mediaPublicId: uploaded?.publicId || "",
+      content: body.content || "",
+      backgroundColor: body.backgroundColor || "linear-gradient(135deg, #2563eb 0%, #db2777 100%)",
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+      seenBy: [],
+      seen: false,
+      views: 0,
+      duration: 5000,
+    };
+    const result = await stories.insertOne(doc);
+    const story = await stories.findOne({ _id: result.insertedId });
+    await createNotification(database, userId, {
+      type: "story",
+      title: "Story publiée",
+      body: "Votre story est disponible pendant 24h",
+      actorId: userId,
+      entityId: String(result.insertedId),
+    });
+    return json(res, 200, ok(normalizeDoc(story)));
+  }
+
+  if (req.method === "POST" && parts[1] === "seen") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    await stories.updateOne({ _id: makeId(parts[0]) }, { $addToSet: { seenBy: userId }, $inc: { views: 1 } });
+    return json(res, 200, ok(null));
+  }
+
+  if (req.method === "DELETE" && parts[0]) {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    await stories.deleteOne({ _id: makeId(parts[0]), userId });
+    return json(res, 200, ok(null, "Story supprimée"));
+  }
+
+  return json(res, 404, error("Endpoint stories introuvable"));
+}
+
+async function notificationRoutes(req, res, parts) {
+  const database = await serviceDb("post");
+  const notifications = database.collection("notifications");
+  const userId = currentUserId(req);
+  if (!userId) return json(res, 401, error("Non authentifié"));
+
+  if (req.method === "GET" && !parts[0]) {
+    const rows = await notifications.find({ userId }).sort({ createdAt: -1 }).limit(50).toArray();
+    return json(res, 200, ok(rows.map(normalizeDoc)));
+  }
+
+  if (req.method === "POST" && parts[0] === "read-all") {
+    await notifications.updateMany({ userId }, { $set: { read: true } });
+    return json(res, 200, ok(null));
+  }
+
+  if (req.method === "POST" && parts[1] === "read") {
+    await notifications.updateOne({ _id: makeId(parts[0]), userId }, { $set: { read: true } });
+    return json(res, 200, ok(null));
+  }
+
+  if (req.method === "DELETE" && parts[0]) {
+    await notifications.deleteOne({ _id: makeId(parts[0]), userId });
+    return json(res, 200, ok(null));
+  }
+
+  return json(res, 404, error("Endpoint notifications introuvable"));
 }
 
 async function videoRoutes(req, res, parts) {
@@ -299,16 +450,51 @@ async function videoRoutes(req, res, parts) {
 
   if (req.method === "POST" && !parts[0]) {
     if (!userId) return json(res, 401, error("Non authentifié"));
-    return json(res, 200, ok({ url: "/placeholder.svg", message: "Upload vidéo à connecter à un stockage externe." }));
+    const body = await readBody(req);
+    if (Number(body.fileSize || 0) > 20 * 1024 * 1024) return json(res, 413, error("Vidéo trop lourde"));
+    const now = new Date().toISOString();
+    const uploaded = body.fileData
+      ? await saveMedia(body.fileData, "mbolo/videos", { resource_type: "video" })
+      : null;
+    const result = await videos.insertOne({
+      userId,
+      title: body.title || body.fileName || "Vidéo",
+      description: body.description || "",
+      videoUrl: uploaded?.url || "",
+      videoPublicId: uploaded?.publicId || "",
+      thumbnailUrl: "",
+      views: 0,
+      likes: [],
+      duration: uploaded?.duration || 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const video = await videos.findOne({ _id: result.insertedId });
+    return json(res, 200, ok(normalizeDoc(video)));
   }
 
   if (req.method === "POST" && parts[1] === "like") {
-    await videos.updateOne({ _id: makeId(parts[0]) }, { $inc: { likes: 1 } });
-    return json(res, 200, ok(null));
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    await videos.updateOne({ _id: makeId(parts[0]) }, { $addToSet: { likes: userId } });
+    const video = await videos.findOne({ _id: makeId(parts[0]) });
+    return json(res, 200, ok(normalizeDoc(video)));
+  }
+
+  if (req.method === "DELETE" && parts[1] === "like") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    await videos.updateOne({ _id: makeId(parts[0]) }, { $pull: { likes: userId } });
+    const video = await videos.findOne({ _id: makeId(parts[0]) });
+    return json(res, 200, ok(normalizeDoc(video)));
   }
 
   if (req.method === "POST" && parts[1] === "view") {
     await videos.updateOne({ _id: makeId(parts[0]) }, { $inc: { views: 1 } });
+    return json(res, 200, ok(null));
+  }
+
+  if (req.method === "DELETE" && parts[0] && !parts[1]) {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    await videos.deleteOne({ _id: makeId(parts[0]), userId });
     return json(res, 200, ok(null));
   }
 
@@ -378,7 +564,10 @@ async function chatRoutes(req, res, parts) {
   }
 
   if (req.method === "POST" && parts[0] === "upload") {
-    return json(res, 200, { url: "/placeholder.svg" });
+    const body = await readBody(req);
+    if (Number(body.fileSize || 0) > 10 * 1024 * 1024) return json(res, 413, error("Fichier trop lourd"));
+    const uploaded = await saveMedia(body.fileData, "mbolo/chat");
+    return json(res, 200, { url: uploaded.url, publicId: uploaded.publicId || "" });
   }
 
   if (["PUT", "POST", "DELETE"].includes(req.method)) {
@@ -394,10 +583,41 @@ async function moderationRoutes(req, res) {
 }
 
 async function syncFollowCounts(database, followerId, followingId) {
-  const follows = database.collection("follows");
-  const users = database.collection("users");
+  const follows = database.collection("user_follows");
+  const users = database.collection("users_profile");
   const followingCount = await follows.countDocuments({ followerId });
   const followersCount = await follows.countDocuments({ followingId });
   await users.updateOne({ _id: makeId(followerId) }, { $set: { followingCount } });
   await users.updateOne({ _id: makeId(followingId) }, { $set: { followersCount } });
+}
+
+async function createNotification(database, userId, payload) {
+  if (!userId) return;
+  const notifications = database.collection("notifications");
+  const actorInitials = String(payload.actorId || "U").slice(0, 2).toUpperCase();
+  await notifications.insertOne({
+    userId,
+    type: payload.type || "message",
+    title: payload.title || "Nouvelle notification",
+    body: payload.body || "",
+    actorId: payload.actorId || "",
+    entityId: payload.entityId || "",
+    avatarInitials: actorInitials,
+    read: false,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+async function saveMedia(fileData, folder, options = {}) {
+  if (!fileData) return { url: "", publicId: "" };
+  if (isCloudinaryConfigured()) {
+    return uploadToCloudinary(fileData, folder, options);
+  }
+
+  return {
+    url: fileData,
+    publicId: "",
+    resourceType: fileData.startsWith("data:video/") ? "video" : "image",
+    duration: 0,
+  };
 }
