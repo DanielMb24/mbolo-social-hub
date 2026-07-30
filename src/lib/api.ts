@@ -8,6 +8,15 @@ export interface ApiResponse<T = any> {
   data?: T;
 }
 
+const unwrapApiData = <T>(response: unknown, fallback: T): T => {
+  if (response && typeof response === 'object' && 'data' in response) {
+    const data = (response as ApiResponse<T>).data;
+    return data ?? fallback;
+  }
+
+  return (response ?? fallback) as T;
+};
+
 export interface AuthResponse {
   success: boolean;
   accessToken: string;
@@ -310,8 +319,8 @@ export const userApi = {
     api.uploadFile(`/api/users/${userId}/cover`, file),
   
   searchUsers: async (query: string) => {
-    const response = await api.get<ApiResponse<UserProfile[]>>(`/api/users/search?q=${encodeURIComponent(query)}`);
-    return response.data!;
+    const response = await api.get<ApiResponse<UserProfile[]> | UserProfile[]>(`/api/users/search?q=${encodeURIComponent(query)}`);
+    return unwrapApiData<UserProfile[]>(response, []);
   },
   
   followUser: (userId: string) => 
@@ -321,18 +330,18 @@ export const userApi = {
     api.delete(`/api/users/${userId}/follow`),
   
   getFollowers: async (userId: string) => {
-    const response = await api.get<ApiResponse<UserProfile[]>>(`/api/users/${userId}/followers`);
-    return response.data!;
+    const response = await api.get<ApiResponse<UserProfile[]> | UserProfile[]>(`/api/users/${userId}/followers`);
+    return unwrapApiData<UserProfile[]>(response, []);
   },
   
   getFollowing: async (userId: string) => {
-    const response = await api.get<ApiResponse<UserProfile[]>>(`/api/users/${userId}/following`);
-    return response.data!;
+    const response = await api.get<ApiResponse<UserProfile[]> | UserProfile[]>(`/api/users/${userId}/following`);
+    return unwrapApiData<UserProfile[]>(response, []);
   },
 
   isFollowing: async (userId: string) => {
-    const response = await api.get<ApiResponse<boolean>>(`/api/users/${userId}/is-following`);
-    return response.data!;
+    const response = await api.get<ApiResponse<boolean> | boolean>(`/api/users/${userId}/is-following`);
+    return unwrapApiData<boolean>(response, false);
   },
 };
 
@@ -341,8 +350,8 @@ export const postApi = {
   getFeed: async (page = 0, size = 20) => {
     try {
       const res = await api.get<any>(`/api/posts?page=${page}&size=${size}`);
-      // Le backend retourne { success: true, data: { content: [...], ... } }
-      return res.data?.data?.content || res.data?.content || [];
+      const data = unwrapApiData<any>(res, {});
+      return data?.data?.content || data?.content || (Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('getFeed error:', error);
       return []; // Retourner un tableau vide en cas d'erreur
@@ -354,12 +363,14 @@ export const postApi = {
     return response.data!;
   },
   
-  createPost: (data: { content: string }, mediaFiles?: File[]) => {
+  createPost: async (data: { content: string }, mediaFiles?: File[]) => {
     if (mediaFiles && mediaFiles.length > 0) {
       // Handle file upload separately
-      return api.uploadFile('/api/posts', mediaFiles[0], { content: data.content });
+      const response = await api.uploadFile('/api/posts', mediaFiles[0], { content: data.content });
+      return unwrapApiData<Post>(response, response);
     }
-    return api.post<Post>('/api/posts', data);
+    const response = await api.post<ApiResponse<Post> | Post>('/api/posts', data);
+    return unwrapApiData<Post>(response, response as Post);
   },
   
   deletePost: (postId: string) => 
