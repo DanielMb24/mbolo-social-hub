@@ -1,0 +1,17 @@
+server:
+  port: 8083
+spring:
+  application:
+    name: chat-service
+  data:
+    mongodb:
+      uri: mongodb+srv://devgroupentreprise_db_user:LWC5S7GRgfB2KN84@cluster-dga-1.xylzvke.mongodb.net/mbolo_chat?retryWrites=true&w=majority
+    redis:
+      host: redis
+      port: 6379
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB
+      max-request-size: 50MB
+      file-size-threshold: 2KB

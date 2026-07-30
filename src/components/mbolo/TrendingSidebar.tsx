@@ -1,4 +1,4 @@
-import { TrendingUp, Users, Hash } from "lucide-react";
+import { TrendingUp, Users, MoreHorizontal } from "lucide-react";
 import { useState, useEffect } from "react";
 import { userApi, postApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
@@ -140,11 +140,12 @@ const TrendingSidebar = () => {
     <div className="w-80 space-y-4 sticky top-4">
       {/* Tendances */}
       <div className="bg-card rounded-xl border shadow-sm overflow-hidden">
-        <div className="p-4 border-b bg-muted/30">
+        <div className="p-4 border-b">
           <h3 className="font-bold text-foreground flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-primary" />
             Tendances au Gabon
           </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">ACTUALITÉS</p>
         </div>
         <div className="divide-y">
           {hashtags.length === 0 ? (
@@ -159,26 +160,34 @@ const TrendingSidebar = () => {
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <p className="font-bold text-foreground text-lg">
+                    <p className="text-xs text-muted-foreground uppercase mb-0.5">
+                      {index === 0 ? 'POLITIQUE' : index === 1 ? 'CULTURE' : index === 2 ? 'LOCAL' : index === 3 ? 'SPORT' : 'ACTUALITÉS'}
+                    </p>
+                    <p className="font-bold text-foreground">
                       {item.tag}
                     </p>
-                    <p className="text-sm text-muted-foreground mt-0.5">
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       {item.count.toLocaleString()} post{item.count > 1 ? 's' : ''}
                     </p>
                   </div>
-                  <Hash className="w-5 h-5 text-muted-foreground mt-1" />
+                  <MoreHorizontal className="w-5 h-5 text-muted-foreground mt-1" />
                 </div>
               </button>
             ))
+          )}
+          {hashtags.length > 0 && (
+            <button className="w-full p-4 text-primary hover:bg-muted/50 transition-colors text-sm font-medium text-left">
+              Voir plus
+            </button>
           )}
         </div>
       </div>
 
       {/* Suggestions */}
       <div className="bg-card rounded-xl border shadow-sm overflow-hidden">
-        <div className="p-4 border-b bg-muted/30">
+        <div className="p-4 border-b">
           <h3 className="font-bold text-foreground flex items-center gap-2">
-            <Users className="w-5 h-5 text-secondary" />
+            <Users className="w-5 h-5 text-primary" />
             Suggestions
           </h3>
         </div>
@@ -212,8 +221,8 @@ const TrendingSidebar = () => {
                       disabled={isLoading}
                       className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all disabled:opacity-50 shrink-0 ${
                         isFollowing
-                          ? "bg-muted text-foreground"
-                          : "bg-primary text-primary-foreground"
+                          ? "bg-muted text-foreground hover:bg-muted/80"
+                          : "bg-primary text-primary-foreground hover:opacity-90"
                       }`}
                     >
                       {isFollowing ? "Abonné" : "Suivre"}
@@ -229,15 +238,15 @@ const TrendingSidebar = () => {
       {/* Footer */}
       <div className="text-xs text-muted-foreground px-4 space-y-2">
         <div className="flex flex-wrap gap-2">
-          <a href="#" className="hover:underline">À propos</a>
+          <a href="#" className="hover:underline">Confidentialité</a>
+          <span>·</span>
+          <a href="#" className="hover:underline">Conditions d'utilisation</a>
           <span>·</span>
           <a href="#" className="hover:underline">Aide</a>
           <span>·</span>
-          <a href="#" className="hover:underline">Confidentialité</a>
-          <span>·</span>
-          <a href="#" className="hover:underline">Conditions</a>
+          <a href="#" className="hover:underline">Publicité</a>
         </div>
-        <p>© 2026 MBolo</p>
+        <p>MBolo © 2026</p>
       </div>
     </div>
   );

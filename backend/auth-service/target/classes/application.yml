@@ -1,0 +1,49 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/mbolo_auth
+    redis:
+      host: localhost
+      port: 6379
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:your-email@gmail.com}
+    password: ${MAIL_PASSWORD:your-app-password}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+jwt:
+  secret: mbolo-super-secret-key-change-in-production-2025
+  access-expiration: 900000      # 15 minutes
+  refresh-expiration: 604800000  # 7 jours
+
+google:
+  client-id: ${GOOGLE_CLIENT_ID}
+  client-secret: ${GOOGLE_CLIENT_SECRET}
+  callback-url: ${GOOGLE_CALLBACK_URL:http://localhost:8081/api/auth/google/callback}
+
+frontend:
+  url: ${FRONTEND_URL:http://localhost:5173}
+
+bcrypt:
+  strength: 12
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

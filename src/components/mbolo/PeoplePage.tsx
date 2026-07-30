@@ -1,4 +1,4 @@
-import { Users, UserPlus, UserMinus, Search, TrendingUp, Loader2, Sparkles, BadgeCheck, Star, Crown, Filter } from "lucide-react";
+import { Users, UserPlus, UserMinus, Search, TrendingUp, Loader2, Sparkles, BadgeCheck, Star, Crown } from "lucide-react";
 import { useState, useEffect } from "react";
 import { userApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
@@ -33,93 +33,6 @@ const PeoplePage = () => {
   const currentUserId = localStorage.getItem('userId') || '';
 
   const loadSuggestions = async () => {
-    const demoUsers: User[] = [
-      {
-        id: 'demo-1',
-        username: 'flavy_m',
-        fullname: 'Flavy Moukagny',
-        bio: 'Artiste & créatrice de contenu 🎨 | Libreville 🇬🇦',
-        followersCount: 1250,
-        followingCount: 340,
-        verified: true,
-        category: 'creators',
-        badge: 'verified'
-      },
-      {
-        id: 'demo-2',
-        username: 'roro_ndg',
-        fullname: 'Roro Ndg',
-        bio: 'Photographe professionnel 📸 | Capturing Gabon',
-        followersCount: 890,
-        followingCount: 210,
-        verified: true,
-        category: 'creators',
-        badge: 'verified'
-      },
-      {
-        id: 'demo-3',
-        username: 'oriana_k',
-        fullname: 'Oriana Krm',
-        bio: 'Influenceuse lifestyle & mode ✨ | #GabonStyle',
-        followersCount: 2100,
-        followingCount: 450,
-        verified: true,
-        category: 'popular',
-        badge: 'star'
-      },
-      {
-        id: 'demo-4',
-        username: 'chef_lbv',
-        fullname: 'Chef Libreville',
-        bio: 'Cuisine gabonaise authentique 🍲 | Recettes traditionnelles',
-        followersCount: 1560,
-        followingCount: 180,
-        category: 'creators'
-      },
-      {
-        id: 'demo-5',
-        username: 'sport_ga',
-        fullname: 'Sport Gabon',
-        bio: 'Actualités sportives � | Football & plus',
-        followersCount: 3200,
-        followingCount: 95,
-        verified: true,
-        category: 'popular',
-        badge: 'crown'
-      },
-      {
-        id: 'demo-6',
-        username: 'music_241',
-        fullname: 'Music Gabon',
-        bio: 'Musique gabonaise 🎵 | Artistes locaux',
-        followersCount: 1890,
-        followingCount: 320,
-        verified: true,
-        category: 'creators',
-        badge: 'verified'
-      },
-      {
-        id: 'demo-7',
-        username: 'fashion_lbv',
-        fullname: 'Fashion Libreville',
-        bio: 'Mode africaine � | Créateurs gabonais',
-        followersCount: 2450,
-        followingCount: 280,
-        verified: true,
-        category: 'popular',
-        badge: 'star'
-      },
-      {
-        id: 'demo-8',
-        username: 'tech_ga',
-        fullname: 'Tech Gabon',
-        bio: 'Innovation & technologie 💻 | Startups gabonaises',
-        followersCount: 1120,
-        followingCount: 150,
-        category: 'creators'
-      }
-    ];
-
     try {
       setLoading(true);
       const allUsers = await userApi.searchUsers("");
@@ -132,11 +45,13 @@ const PeoplePage = () => {
           bio: u.bio,
           avatarUrl: u.avatarUrl,
           followersCount: u.followersCount || 0,
-          followingCount: u.followingCount || 0
+          followingCount: u.followingCount || 0,
+          verified: (u.followersCount || 0) > 1000,
+          category: (u.followersCount || 0) > 2000 ? 'popular' : 'creators',
+          badge: (u.followersCount || 0) > 3000 ? 'crown' as const : (u.followersCount || 0) > 2000 ? 'star' as const : (u.followersCount || 0) > 1000 ? 'verified' as const : undefined
         }));
       
-      const usersToDisplay = [...filteredUsers, ...demoUsers];
-      setUsers(usersToDisplay);
+      setUsers(filteredUsers);
 
       if (filteredUsers.length > 0) {
         const followingStatuses = await Promise.all(
@@ -157,7 +72,7 @@ const PeoplePage = () => {
       }
     } catch (error) {
       console.error('Error loading suggestions:', error);
-      setUsers(demoUsers);
+      setUsers([]);
     } finally {
       setLoading(false);
     }
@@ -165,6 +80,7 @@ const PeoplePage = () => {
 
   useEffect(() => {
     loadSuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSearch = async () => {
@@ -185,7 +101,10 @@ const PeoplePage = () => {
           bio: u.bio,
           avatarUrl: u.avatarUrl,
           followersCount: u.followersCount || 0,
-          followingCount: u.followingCount || 0
+          followingCount: u.followingCount || 0,
+          verified: (u.followersCount || 0) > 1000,
+          category: (u.followersCount || 0) > 2000 ? 'popular' : 'creators',
+          badge: (u.followersCount || 0) > 3000 ? 'crown' as const : (u.followersCount || 0) > 2000 ? 'star' as const : (u.followersCount || 0) > 1000 ? 'verified' as const : undefined
         }));
       setUsers(filteredResults);
     } catch (error) {
@@ -267,8 +186,8 @@ const PeoplePage = () => {
         {/* Header */}
         <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b mb-3">
           <div className="p-3">
-            <h2 className="text-xl font-bold text-foreground mb-3 flex items-center gap-2">
-              <Users className="w-5 h-5" />
+            <h2 className="text-2xl font-extrabold text-foreground mb-3 flex items-center gap-2">
+              <Users className="w-6 h-6" />
               Découvrir des personnes
             </h2>
             
@@ -441,10 +360,10 @@ const PeoplePage = () => {
                     <button
                       onClick={() => toggleFollow(user.id)}
                       disabled={isLoading}
-                      className={`px-4 py-2 rounded-full text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shrink-0 ${
+                      className={`px-6 py-2.5 rounded-xl font-extrabold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shrink-0 shadow-md ${
                         isFollowing
                           ? "bg-muted text-foreground hover:bg-destructive/10 hover:text-destructive"
-                          : "bg-primary text-primary-foreground hover:opacity-90 shadow-sm"
+                          : "btn-gradient-orange"
                       }`}
                     >
                       {isLoading ? (

@@ -12,7 +12,10 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  plugins: [
+    react(), 
+    mode === "development" && componentTagger()
+  ].filter(Boolean),
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -22,16 +25,28 @@ export default defineConfig(({ mode }) => ({
     global: 'globalThis',
   },
   build: {
+    target: 'es2015',
+    minify: 'esbuild',
     rollupOptions: {
       output: {
-        // Code splitting par vendor
         manualChunks: {
-          "react-vendor": ["react", "react-dom", "react-router-dom"],
-          "ui-vendor": ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-tooltip"],
-          "emoji": ["emoji-mart", "@emoji-mart/react", "@emoji-mart/data"],
+          "react-core": ["react", "react-dom", "react-router-dom"],
+          "ui-radix": [
+            "@radix-ui/react-dialog", 
+            "@radix-ui/react-dropdown-menu", 
+            "@radix-ui/react-tooltip",
+            "@radix-ui/react-avatar",
+            "@radix-ui/react-tabs"
+          ],
+          "query": ["@tanstack/react-query"],
         },
       },
     },
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 500,
+    cssCodeSplit: true,
+    sourcemap: mode === 'development',
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-router-dom'],
   },
 }));

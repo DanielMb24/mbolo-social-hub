@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   MessageCircle, Users, Video, Home, User, Search, Bell,
-  Menu, X, LogOut, WifiOff, Compass
+  Menu, X, LogOut, WifiOff, Compass, Sparkles
 } from "lucide-react";
 import FeedPage from "@/components/mbolo/FeedPage";
 import ChatPage from "@/components/mbolo/ChatPage";
@@ -9,6 +9,7 @@ import VideoPage from "@/components/mbolo/VideoPage";
 import ProfilePage from "@/components/mbolo/ProfilePage";
 import PeoplePage from "@/components/mbolo/PeoplePage";
 import ExplorePage from "@/components/mbolo/ExplorePage";
+import StoryManager from "@/components/mbolo/StoryManager";
 import TrendingSidebar from "@/components/mbolo/TrendingSidebar";
 import AuthPage from "@/components/mbolo/AuthPage";
 import NotificationPanel from "@/components/mbolo/NotificationPanel";
@@ -16,12 +17,14 @@ import GlobalSearch from "@/components/mbolo/GlobalSearch";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { userApi } from "@/lib/api";
+import { getDisplayUsername } from "@/lib/format-utils";
 
-type Tab = "feed" | "chat" | "videos" | "people" | "profile" | "explore";
+type Tab = "feed" | "chat" | "videos" | "people" | "profile" | "explore" | "stories";
 
 const NAV_ITEMS: { id: Tab; icon: React.ElementType; label: string }[] = [
   { id: "feed", icon: Home, label: "Accueil" },
   { id: "explore", icon: Compass, label: "Explorer" },
+  { id: "stories", icon: Sparkles, label: "Stories" },
   { id: "chat", icon: MessageCircle, label: "Messenger" },
   { id: "videos", icon: Video, label: "Vidéos" },
   { id: "people", icon: Users, label: "Amis" },
@@ -52,7 +55,12 @@ const Index = () => {
           const profile = await userApi.getProfile(userId);
           setCurrentUser(profile);
         } catch {
-          setCurrentUser({ id: userId, username: userId.substring(0, 8), email: '', createdAt: new Date().toISOString() });
+          setCurrentUser({ 
+            id: userId, 
+            username: getDisplayUsername(undefined, userId), 
+            email: '', 
+            createdAt: new Date().toISOString() 
+          });
         }
       }
     } catch {}
@@ -79,7 +87,7 @@ const Index = () => {
   };
 
   // Header nav items for Facebook-style top bar
-  const headerNavItems = NAV_ITEMS.filter(n => ['feed', 'explore', 'videos', 'people', 'chat'].includes(n.id));
+  const headerNavItems = NAV_ITEMS.filter(n => ['feed', 'explore', 'stories', 'videos', 'people', 'chat'].includes(n.id));
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -92,23 +100,23 @@ const Index = () => {
       )}
 
       {/* ─── Top Header - Facebook style ─── */}
-      <header className="flex items-center justify-between px-3 h-14 border-b bg-card shrink-0 z-40 shadow-sm">
+      <header className="flex items-center justify-between px-2 h-12 border-b bg-card shrink-0 z-40">
         {/* Left: Logo */}
-        <div className="flex items-center gap-2 shrink-0">
-          {isMobile ? (
-            <button onClick={() => setMobileMenuOpen(true)} className="p-2 -ml-1 rounded-lg hover:bg-muted transition-colors">
-              <Menu className="w-5 h-5 text-foreground" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isMobile && (
+            <button onClick={() => setMobileMenuOpen(true)} className="p-1.5 rounded-lg hover:bg-muted">
+              <Menu className="w-5 h-5" />
             </button>
-          ) : null}
-          <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center">
-            <MessageCircle className="w-5 h-5 text-primary-foreground" />
+          )}
+          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+            <MessageCircle className="w-4 h-4 text-primary-foreground" />
           </div>
-          {!isMobile && <span className="text-xl font-extrabold text-primary tracking-tight">MBolo</span>}
+          {!isMobile && <span className="text-lg font-bold text-primary">MBolo</span>}
         </div>
 
-        {/* Center: Navigation tabs (desktop) */}
-        {!isMobile && (
-          <div className="flex-1 flex items-center justify-center max-w-xl mx-8">
+        {/* Center: Navigation tabs */}
+        {!isMobile ? (
+          <div className="flex-1 flex items-center justify-center max-w-lg mx-4">
             {headerNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -116,16 +124,14 @@ const Index = () => {
                 <button
                   key={item.id}
                   onClick={() => handleTabChange(item.id)}
-                  className={`relative flex-1 flex items-center justify-center py-2.5 transition-colors group ${
-                    isActive ? "text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg"
+                  className={`relative flex-1 flex items-center justify-center py-2 ${
+                    isActive ? "text-primary" : "text-muted-foreground hover:bg-muted rounded-lg"
                   }`}
                 >
-                  <Icon className="w-6 h-6" />
-                  {isActive && (
-                    <div className="absolute bottom-0 left-2 right-2 h-[3px] bg-primary rounded-t-full" />
-                  )}
+                  <Icon className="w-5 h-5" />
+                  {isActive && <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-primary" />}
                   {item.id === 'chat' && unreadCount > 0 && (
-                    <span className="absolute top-1 right-1/4 min-w-[18px] h-[18px] rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center px-1">
+                    <span className="absolute top-0 right-1/4 min-w-[16px] h-[16px] rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center px-0.5">
                       {unreadCount}
                     </span>
                   )}
@@ -133,11 +139,8 @@ const Index = () => {
               );
             })}
           </div>
-        )}
-
-        {/* Mobile center tabs */}
-        {isMobile && (
-          <div className="flex items-center gap-0.5">
+        ) : (
+          <div className="flex items-center gap-1">
             {headerNavItems.slice(0, 4).map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -145,11 +148,16 @@ const Index = () => {
                 <button
                   key={item.id}
                   onClick={() => handleTabChange(item.id)}
-                  className={`p-2 rounded-lg transition-colors relative ${
+                  className={`p-1.5 rounded-lg relative ${
                     isActive ? "text-primary bg-primary/10" : "text-muted-foreground"
                   }`}
                 >
                   <Icon className="w-5 h-5" />
+                  {item.id === 'chat' && unreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] rounded-full bg-destructive text-white text-[8px] font-bold flex items-center justify-center">
+                      {unreadCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -160,18 +168,18 @@ const Index = () => {
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => { setShowSearch(true); setShowNotifications(false); }}
-            className="w-9 h-9 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
+            className="w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80"
           >
-            <Search className="w-4 h-4 text-foreground" />
+            <Search className="w-4 h-4" />
           </button>
           <div className="relative">
             <button
               onClick={() => setShowNotifications(n => !n)}
-              className="w-9 h-9 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors relative"
+              className="w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 relative"
             >
-              <Bell className="w-4 h-4 text-foreground" />
+              <Bell className="w-4 h-4" />
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center px-1">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center px-0.5">
                   {unreadCount}
                 </span>
               )}
@@ -181,8 +189,8 @@ const Index = () => {
           {!isMobile && (
             <button
               onClick={() => handleTabChange('profile')}
-              className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-colors ${
-                activeTab === 'profile' ? "bg-primary text-primary-foreground ring-2 ring-primary/30" : "bg-muted text-foreground hover:bg-muted/80"
+              className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-[10px] ${
+                activeTab === 'profile' ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"
               }`}
             >
               {userInitials}
@@ -195,13 +203,13 @@ const Index = () => {
       <div className="flex flex-1 overflow-hidden">
         {/* Desktop Left Sidebar */}
         {!isMobile && (activeTab === 'feed' || activeTab === 'explore') && (
-          <aside className="w-[280px] border-r overflow-y-auto p-3 hidden xl:block shrink-0">
-            <div className="space-y-1">
-              <button onClick={() => handleTabChange('profile')} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors text-left">
-                <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-xs">
+          <aside className="w-[240px] border-r overflow-y-auto p-2 hidden xl:block shrink-0">
+            <div className="space-y-0.5">
+              <button onClick={() => handleTabChange('profile')} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-muted text-left">
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-xs">
                   {userInitials}
                 </div>
-                <span className="text-sm font-semibold text-foreground">{currentUser?.fullname || username}</span>
+                <span className="text-sm font-medium">{currentUser?.fullname || username}</span>
               </button>
               {[
                 { icon: Users, label: 'Amis', tab: 'people' as Tab },
@@ -212,10 +220,10 @@ const Index = () => {
                 <button
                   key={item.label}
                   onClick={() => handleTabChange(item.tab)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors text-left"
+                  className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-muted text-left"
                 >
                   <item.icon className="w-5 h-5 text-primary" />
-                  <span className="text-sm font-medium text-foreground">{item.label}</span>
+                  <span className="text-sm font-medium">{item.label}</span>
                 </button>
               ))}
             </div>
@@ -226,6 +234,13 @@ const Index = () => {
         <main className="flex-1 overflow-y-auto bg-muted/30">
           {activeTab === "feed" && <FeedPage />}
           {activeTab === "explore" && <ExplorePage />}
+          {activeTab === "stories" && (
+            <StoryManager
+              currentUserId={currentUser?.id || userId || "me"}
+              currentUsername={username}
+              currentUserInitials={userInitials}
+            />
+          )}
           {activeTab === "people" && <PeoplePage />}
           {activeTab === "chat" && <ChatPage />}
           {activeTab === "videos" && <VideoPage />}
@@ -234,7 +249,7 @@ const Index = () => {
 
         {/* Right Sidebar */}
         {!isMobile && (activeTab === 'feed' || activeTab === 'explore') && (
-          <div className="w-[300px] border-l overflow-y-auto p-4 hidden lg:block shrink-0">
+          <div className="w-[280px] border-l overflow-y-auto p-3 hidden lg:block shrink-0">
             <TrendingSidebar />
           </div>
         )}

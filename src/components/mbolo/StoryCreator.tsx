@@ -250,9 +250,10 @@ const StoryCreator = ({
         <div className="p-4 border-t">
           <button
             onClick={handlePublish}
-            className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/90 transition-colors"
+            className="btn-gradient-orange w-full flex items-center justify-center gap-2"
           >
-            Publier la story
+            <span className="text-lg">🔥</span>
+            <span className="font-extrabold">Publier la story</span>
           </button>
         </div>
       </div>

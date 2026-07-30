@@ -306,6 +306,9 @@ export const userApi = {
   uploadAvatar: (userId: string, file: File) => 
     api.uploadFile(`/api/users/${userId}/avatar`, file),
   
+  uploadCover: (userId: string, file: File) => 
+    api.uploadFile(`/api/users/${userId}/cover`, file),
+  
   searchUsers: async (query: string) => {
     const response = await api.get<ApiResponse<UserProfile[]>>(`/api/users/search?q=${encodeURIComponent(query)}`);
     return response.data!;

@@ -1,0 +1,8 @@
+server:
+  port: 8084
+spring:
+  application:
+    name: post-service
+  data:
+    mongodb:
+      uri: mongodb+srv://devgroupentreprise_db_user:LWC5S7GRgfB2KN84@cluster-dga-1.xylzvke.mongodb.net/mbolo_post?retryWrites=true&w=majority

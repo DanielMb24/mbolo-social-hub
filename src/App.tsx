@@ -6,7 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useState, lazy, Suspense } from "react";
 import { Loader2 } from "lucide-react";
 
-// Code splitting: lazy load des pages lourdes
+// Code splitting: lazy load des pages
 const AuthPage = lazy(() => import("@/components/mbolo/AuthPage"));
 const Index = lazy(() => import("./pages/Index"));
 const PostDetail = lazy(() => import("./pages/PostDetail"));
@@ -17,9 +17,11 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
-      retry: 2,
+      staleTime: 60_000, // 1 minute
+      cacheTime: 300_000, // 5 minutes
+      retry: 1,
       refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
     },
   },
 });
@@ -37,7 +39,7 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Sonner />
+        <Sonner position="top-center" />
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Suspense fallback={<PageLoader />}>
             <Routes>
