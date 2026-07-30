@@ -23,7 +23,9 @@ export const ChatProfileSidebar = ({ userId, onClose }: ChatProfileSidebarProps)
     try {
       const data = await userApi.getProfile(userId);
       setProfile(data);
-    } catch {} finally {
+    } catch (error) {
+      console.warn("Impossible de charger le profil", error);
+    } finally {
       setLoading(false);
     }
   };

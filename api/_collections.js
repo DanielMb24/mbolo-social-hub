@@ -1,0 +1,16 @@
+export const COLLECTIONS = {
+  authUsers: "users_auth",
+  refreshTokens: "refresh_tokens",
+  passwordResetTokens: "password_reset_tokens",
+  userProfiles: "users_profile",
+  userFollows: "user_follows",
+  posts: "posts",
+  comments: "comments",
+  stories: "stories",
+  notifications: "notifications",
+  videos: "videos",
+  conversations: "conversations",
+  messages: "messages",
+  reports: "reports",
+  auditLogs: "audit_logs",
+};

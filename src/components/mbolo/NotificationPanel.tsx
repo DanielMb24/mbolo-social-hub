@@ -36,9 +36,10 @@ const iconForType = (type: AppNotification["type"]) => {
 
 interface NotificationPanelProps {
   onClose: () => void;
+  onUnreadChange?: (count: number) => void;
 }
 
-const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
+const NotificationPanel = ({ onClose, onUnreadChange }: NotificationPanelProps) => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -47,6 +48,7 @@ const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
 
   const markAllRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    onUnreadChange?.(0);
     await notificationApi.markAllRead().catch(() => undefined);
   };
 
@@ -62,10 +64,17 @@ const NotificationPanel = ({ onClose }: NotificationPanelProps) => {
 
   useEffect(() => {
     notificationApi.getNotifications()
-      .then(setNotifications)
+      .then((items) => {
+        setNotifications(items);
+        onUnreadChange?.(items.filter(n => !n.read).length);
+      })
       .catch(() => setNotifications([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [onUnreadChange]);
+
+  useEffect(() => {
+    onUnreadChange?.(unreadCount);
+  }, [onUnreadChange, unreadCount]);
 
   // Fermer en cliquant hors du panneau
   useEffect(() => {

@@ -1,23 +1,25 @@
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import {
   MessageCircle, Users, Video, Home, User, Search, Bell,
   Menu, X, LogOut, WifiOff, Compass, Sparkles
 } from "lucide-react";
-import FeedPage from "@/components/mbolo/FeedPage";
-import ChatPage from "@/components/mbolo/ChatPage";
-import VideoPage from "@/components/mbolo/VideoPage";
-import ProfilePage from "@/components/mbolo/ProfilePage";
-import PeoplePage from "@/components/mbolo/PeoplePage";
-import ExplorePage from "@/components/mbolo/ExplorePage";
-import StoryManager from "@/components/mbolo/StoryManager";
-import TrendingSidebar from "@/components/mbolo/TrendingSidebar";
 import AuthPage from "@/components/mbolo/AuthPage";
-import NotificationPanel from "@/components/mbolo/NotificationPanel";
-import GlobalSearch from "@/components/mbolo/GlobalSearch";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useOnlineStatus } from "@/hooks/use-online-status";
-import { userApi } from "@/lib/api";
+import { authApi, notificationApi, userApi, type UserProfile } from "@/lib/api";
 import { getDisplayUsername } from "@/lib/format-utils";
+import { useNavigate } from "react-router-dom";
+
+const FeedPage = lazy(() => import("@/components/mbolo/FeedPage"));
+const ChatPage = lazy(() => import("@/components/mbolo/ChatPage"));
+const VideoPage = lazy(() => import("@/components/mbolo/VideoPage"));
+const ProfilePage = lazy(() => import("@/components/mbolo/ProfilePage"));
+const PeoplePage = lazy(() => import("@/components/mbolo/PeoplePage"));
+const ExplorePage = lazy(() => import("@/components/mbolo/ExplorePage"));
+const StoryManager = lazy(() => import("@/components/mbolo/StoryManager"));
+const TrendingSidebar = lazy(() => import("@/components/mbolo/TrendingSidebar"));
+const NotificationPanel = lazy(() => import("@/components/mbolo/NotificationPanel"));
+const GlobalSearch = lazy(() => import("@/components/mbolo/GlobalSearch"));
 
 type Tab = "feed" | "chat" | "videos" | "people" | "profile" | "explore" | "stories";
 
@@ -31,20 +33,49 @@ const NAV_ITEMS: { id: Tab; icon: React.ElementType; label: string }[] = [
   { id: "profile", icon: User, label: "Profil" },
 ];
 
+const LoadingPanel = () => (
+  <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
+    <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2" />
+    Chargement...
+  </div>
+);
+
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('token'));
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("feed");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
-  const [unreadCount] = useState(3);
+  const [unreadCount, setUnreadCount] = useState(0);
   const isMobile = useIsMobile();
   const isOnline = useOnlineStatus();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (isAuthenticated) loadCurrentUser();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let active = true;
+
+    const refreshUnreadCount = async () => {
+      try {
+        const count = await notificationApi.getUnreadCount();
+        if (active) setUnreadCount(count);
+      } catch {
+        if (active) setUnreadCount(0);
+      }
+    };
+
+    refreshUnreadCount();
+    const interval = window.setInterval(refreshUnreadCount, 45_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, [isAuthenticated]);
 
   const loadCurrentUser = async () => {
@@ -63,13 +94,13 @@ const Index = () => {
           });
         }
       }
-    } catch {}
+    } catch (error) {
+      console.warn("Impossible de valider l'utilisateur courant", error);
+    }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('userId');
+  const handleLogout = async () => {
+    await authApi.logout();
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
@@ -80,10 +111,27 @@ const Index = () => {
 
   const userInitials = currentUser?.username?.substring(0, 2).toUpperCase() || 'U';
   const username = currentUser?.username || 'Utilisateur';
+  const currentUserId = currentUser?.id || localStorage.getItem('userId') || "me";
 
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab);
     if (isMobile) setMobileMenuOpen(false);
+  };
+
+  const handleSearchNavigate = (result: { targetTab?: Tab; targetId?: string; type: string }) => {
+    if (result.targetTab === "profile" && result.targetId) {
+      navigate(`/profile/${result.targetId}`);
+      return;
+    }
+
+    if (result.type === "post" && result.targetId) {
+      navigate(`/post/${result.targetId}`);
+      return;
+    }
+
+    if (result.targetTab) {
+      setActiveTab(result.targetTab);
+    }
   };
 
   // Header nav items for Facebook-style top bar
@@ -184,7 +232,14 @@ const Index = () => {
                 </span>
               )}
             </button>
-            {showNotifications && <NotificationPanel onClose={() => setShowNotifications(false)} />}
+            {showNotifications && (
+              <Suspense fallback={null}>
+                <NotificationPanel
+                  onClose={() => setShowNotifications(false)}
+                  onUnreadChange={setUnreadCount}
+                />
+              </Suspense>
+            )}
           </div>
           {!isMobile && (
             <button
@@ -232,31 +287,42 @@ const Index = () => {
 
         {/* Main */}
         <main className="flex-1 overflow-y-auto bg-muted/30">
-          {activeTab === "feed" && <FeedPage />}
-          {activeTab === "explore" && <ExplorePage />}
-          {activeTab === "stories" && (
-            <StoryManager
-              currentUserId={currentUser?.id || userId || "me"}
-              currentUsername={username}
-              currentUserInitials={userInitials}
-            />
-          )}
-          {activeTab === "people" && <PeoplePage />}
-          {activeTab === "chat" && <ChatPage />}
-          {activeTab === "videos" && <VideoPage />}
-          {activeTab === "profile" && <ProfilePage onLogout={handleLogout} />}
+          <Suspense fallback={<LoadingPanel />}>
+            {activeTab === "feed" && <FeedPage />}
+            {activeTab === "explore" && <ExplorePage />}
+            {activeTab === "stories" && (
+              <StoryManager
+                currentUserId={currentUserId}
+                currentUsername={username}
+                currentUserInitials={userInitials}
+              />
+            )}
+            {activeTab === "people" && <PeoplePage />}
+            {activeTab === "chat" && <ChatPage />}
+            {activeTab === "videos" && <VideoPage />}
+            {activeTab === "profile" && <ProfilePage onLogout={handleLogout} />}
+          </Suspense>
         </main>
 
         {/* Right Sidebar */}
         {!isMobile && (activeTab === 'feed' || activeTab === 'explore') && (
           <div className="w-[280px] border-l overflow-y-auto p-3 hidden lg:block shrink-0">
-            <TrendingSidebar />
+            <Suspense fallback={null}>
+              <TrendingSidebar />
+            </Suspense>
           </div>
         )}
       </div>
 
       {/* Global Search Overlay */}
-      {showSearch && <GlobalSearch onClose={() => setShowSearch(false)} />}
+      {showSearch && (
+        <Suspense fallback={null}>
+          <GlobalSearch
+            onClose={() => setShowSearch(false)}
+            onNavigate={handleSearchNavigate}
+          />
+        </Suspense>
+      )}
 
       {/* Mobile Drawer */}
       {isMobile && mobileMenuOpen && (

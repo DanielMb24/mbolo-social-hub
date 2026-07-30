@@ -30,7 +30,6 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
         if (!response.accessToken || !response.userId) throw new Error('Réponse invalide');
         
         localStorage.setItem('token', response.accessToken);
-        localStorage.setItem('refreshToken', response.refreshToken);
         localStorage.setItem('userId', response.userId);
         localStorage.setItem('username', username);
         toast.success(`Bienvenue ${username}`, { description: 'Connexion réussie' });
@@ -40,7 +39,6 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
         if (!response.accessToken || !response.userId) throw new Error('Réponse invalide');
         
         localStorage.setItem('token', response.accessToken);
-        localStorage.setItem('refreshToken', response.refreshToken);
         localStorage.setItem('userId', response.userId);
         localStorage.setItem('username', username);
         
