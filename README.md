@@ -171,6 +171,29 @@ npm run build
 npm run preview
 ```
 
+### Déploiement Vercel
+
+Le frontend est prêt pour Vercel avec `vercel.json`.
+
+Paramètres du projet Vercel:
+- **Framework Preset**: Vite
+- **Install Command**: `npm ci`
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+
+Variables d'environnement à configurer dans Vercel:
+```env
+VITE_API_BASE_URL=
+VITE_WS_URL=
+VITE_ENV=production
+VITE_GOOGLE_CLIENT_ID=votre_google_client_id
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/mbolo
+MONGODB_SERVICE_PREFIX=mbolo
+JWT_SECRET=une_longue_valeur_secrete
+```
+
+Le dossier `api/` contient une version serverless du backend pour Vercel. Elle utilise MongoDB Atlas via `MONGODB_URI` et lit les bases existantes `mbolo_auth`, `mbolo_user`, `mbolo_post`, `mbolo_chat`, `mbolo_video` avec le préfixe `MONGODB_SERVICE_PREFIX=mbolo`. Les uploads de fichiers et les WebSockets persistants doivent être connectés ensuite à des services externes compatibles serverless.
+
 ### Android
 ```bash
 # Build et sync Android

@@ -1,5 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:8080');
+const WS_URL = import.meta.env.VITE_WS_URL ?? (import.meta.env.PROD ? '' : 'ws://localhost:8080');
 
 // Types
 export interface ApiResponse<T = any> {
