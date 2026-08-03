@@ -10,18 +10,16 @@ class WebSocketService {
       return;
     }
 
-    // Utiliser l'API Gateway au lieu de se connecter directement au service
-    // SockJS n'accepte que http:// ou https://, pas ws://
-    let wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:8080/ws-chat';
-    
-    // Convertir ws:// en http:// et wss:// en https://
-    if (wsUrl.startsWith('ws://')) {
-      wsUrl = wsUrl.replace('ws://', 'http://');
-    } else if (wsUrl.startsWith('wss://')) {
-      wsUrl = wsUrl.replace('wss://', 'https://');
+    const wsUrl = resolveSockJsUrl();
+    if (!wsUrl) return;
+
+    let socket: SockJS;
+    try {
+      socket = new SockJS(wsUrl);
+    } catch (error) {
+      console.warn("Connexion temps réel indisponible:", error);
+      return;
     }
-    
-    const socket = new SockJS(wsUrl);
     
     this.client = new Client({
       webSocketFactory: () => socket as any,
@@ -63,7 +61,16 @@ class WebSocketService {
       console.error('Additional details: ' + frame.body);
     };
 
-    this.client.activate();
+    this.client.onWebSocketError = (event) => {
+      console.warn("WebSocket indisponible", event);
+    };
+
+    try {
+      this.client.activate();
+    } catch (error) {
+      console.warn("Connexion temps réel indisponible:", error);
+      this.connected = false;
+    }
   }
 
   disconnect() {
@@ -84,3 +91,28 @@ class WebSocketService {
 }
 
 export const wsService = new WebSocketService();
+
+function resolveSockJsUrl() {
+  const configured = String(import.meta.env.VITE_WS_URL || "").trim();
+  const fallback = import.meta.env.DEV ? "http://localhost:8080/ws-chat" : `${window.location.origin}/ws-chat`;
+  let raw = configured || fallback;
+
+  if (raw.startsWith("ws://")) raw = raw.replace("ws://", "http://");
+  if (raw.startsWith("wss://")) raw = raw.replace("wss://", "https://");
+
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (window.location.protocol === "https:" && url.protocol === "http:") {
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        console.warn("WebSocket désactivé: URL locale non sécurisée en HTTPS");
+        return "";
+      }
+      url.protocol = "https:";
+    }
+    if (!url.pathname || url.pathname === "/") url.pathname = "/ws-chat";
+    return url.toString();
+  } catch {
+    console.warn("VITE_WS_URL invalide");
+    return "";
+  }
+}

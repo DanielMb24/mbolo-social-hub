@@ -7,7 +7,7 @@ import {
 } from "./error-notifier";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:8080');
-const WS_URL = import.meta.env.VITE_WS_URL ?? (import.meta.env.PROD ? '' : 'ws://localhost:8080');
+const WS_URL = resolveNativeWsUrl();
 const REQUEST_TIMEOUT_MS = 15_000;
 const GET_CACHE_TTL_MS = 20_000;
 
@@ -709,6 +709,7 @@ export const notificationApi = {
   markRead: (id: string) => api.post(`/api/notifications/${id}/read`),
   markAllRead: () => api.post('/api/notifications/read-all'),
   dismiss: (id: string) => api.delete(`/api/notifications/${id}`),
+  sendTestEmail: () => api.post('/api/notifications/test-email'),
 };
 
 export const searchApi = {
@@ -900,6 +901,23 @@ export class ChatWebSocket {
       this.ws.close();
       this.ws = null;
     }
+  }
+}
+
+function resolveNativeWsUrl() {
+  const configured = String(import.meta.env.VITE_WS_URL || "").trim();
+  const fallback = import.meta.env.DEV ? "ws://localhost:8080" : window.location.origin;
+  let raw = configured || fallback;
+  if (raw.startsWith("http://")) raw = raw.replace("http://", "ws://");
+  if (raw.startsWith("https://")) raw = raw.replace("https://", "wss://");
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (window.location.protocol === "https:" && url.protocol === "ws:") {
+      url.protocol = "wss:";
+    }
+    return url.origin;
+  } catch {
+    return window.location.protocol === "https:" ? `wss://${window.location.host}` : `ws://${window.location.host}`;
   }
 }
 

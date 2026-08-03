@@ -20,6 +20,7 @@ import {
 import { isCloudinaryConfigured, uploadToCloudinary } from "./_cloudinary.js";
 import { COLLECTIONS } from "./_collections.js";
 import { applySecurityHeaders, clearRefreshCookie, randomTokenId, setRefreshCookie } from "./_http.js";
+import { isEmailConfigured, sendNotificationEmail } from "./_smtp-mailer.js";
 import {
   escapeRegex,
   parsePagination,
@@ -678,6 +679,18 @@ async function notificationRoutes(req, res, parts) {
   const notifications = database.collection(COLLECTIONS.notifications);
   const userId = currentUserId(req);
   if (!userId) return json(res, 401, error("Non authentifié"));
+
+  if (req.method === "POST" && parts[0] === "test-email") {
+    const userDb = await serviceDb("user");
+    const profile = await userDb.collection(COLLECTIONS.userProfiles).findOne({ _id: makeId(userId) });
+    if (!profile?.email) return json(res, 400, error("Aucun email sur ce profil"));
+    if (!isEmailConfigured()) return json(res, 503, error("SMTP non configuré"));
+    await sendNotificationEmail(profile.email, {
+      title: "Test email MBolo",
+      body: "La configuration SMTP fonctionne.",
+    });
+    return json(res, 200, ok(null, "Email envoyé"));
+  }
 
   if (req.method === "GET" && !parts[0]) {
     const rows = await notifications.find({ userId }).sort({ createdAt: -1 }).limit(50).toArray();
@@ -1448,7 +1461,7 @@ async function createNotification(database, userId, payload) {
   const notificationDb = await serviceDb("post");
   const notifications = notificationDb.collection(COLLECTIONS.notifications);
   const actorInitials = String(payload.actorId || "U").slice(0, 2).toUpperCase();
-  await notifications.insertOne({
+  const doc = {
     userId,
     type: payload.type || "message",
     title: payload.title || "Nouvelle notification",
@@ -1458,7 +1471,25 @@ async function createNotification(database, userId, payload) {
     avatarInitials: actorInitials,
     read: false,
     createdAt: new Date().toISOString(),
+    emailSent: false,
+  };
+  await notifications.insertOne(doc);
+  sendNotificationEmailForUser(userId, doc).catch((err) => {
+    console.error("Email notification failed:", err?.message || err);
   });
+}
+
+async function sendNotificationEmailForUser(userId, notification) {
+  if (!isEmailConfigured()) return;
+  const userDb = await serviceDb("user");
+  const profile = await userDb.collection(COLLECTIONS.userProfiles).findOne({ _id: makeId(userId) });
+  if (!profile?.email) return;
+  await sendNotificationEmail(profile.email, notification);
+  const notificationDb = await serviceDb("post");
+  await notificationDb.collection(COLLECTIONS.notifications).updateOne(
+    { userId, createdAt: notification.createdAt, title: notification.title },
+    { $set: { emailSent: true, emailSentAt: new Date().toISOString() } }
+  );
 }
 
 async function uniqueSlug(collection, name) {
