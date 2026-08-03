@@ -144,8 +144,16 @@ async function authRoutes(req, res, parts) {
   if (req.method === "GET" && parts[0] === "me") {
     const userId = currentUserId(req);
     if (!userId) return json(res, 401, error("Non authentifié"));
-    const user = await profiles.findOne({ _id: makeId(userId) });
-    return user ? json(res, 200, ok(privateUser(user))) : json(res, 404, error("Utilisateur introuvable"));
+    const [user, authUser] = await Promise.all([
+      profiles.findOne({ _id: makeId(userId) }),
+      users.findOne({ _id: makeId(userId) }),
+    ]);
+    return user ? json(res, 200, ok({
+      ...privateUser(user),
+      roles: authUser?.roles || ["USER"],
+      suspended: Boolean(user.suspended || authUser?.suspended),
+      isActive: authUser?.isActive !== false,
+    })) : json(res, 404, error("Utilisateur introuvable"));
   }
 
   if (req.method === "POST" && parts[0] === "forgot-password") {
@@ -1476,7 +1484,7 @@ async function adminRoutes(req, res, parts) {
     }));
   }
 
-  if (req.method === "GET" && parts[0] === "users") {
+  if (req.method === "GET" && parts[0] === "users" && !parts[1]) {
     const url = new URL(req.url, "http://localhost");
     const { page, size } = parsePagination(url);
     const q = validateSearch(url.searchParams.get("q"));
@@ -1496,6 +1504,43 @@ async function adminRoutes(req, res, parts) {
       isActive: authById.get(String(profile._id))?.isActive !== false,
       suspendedReason: profile.suspendedReason || authById.get(String(profile._id))?.suspendedReason || "",
     })), page, size, total));
+  }
+
+  if (req.method === "GET" && parts[0] === "users" && parts[1]) {
+    const targetId = validateId(parts[1], "Utilisateur");
+    const [profile, authUser, postsCount, commentsCount, reportsCount, recentPosts, recentReports] = await Promise.all([
+      profiles.findOne({ _id: makeId(targetId) }),
+      authUsers.findOne({ _id: makeId(targetId) }),
+      posts.countDocuments({ authorId: targetId }),
+      comments.countDocuments({ authorId: targetId }),
+      reports.countDocuments({ reporterId: targetId }),
+      posts.find({ authorId: targetId }).sort({ createdAt: -1 }).limit(5).toArray(),
+      reports.find({ reporterId: targetId }).sort({ createdAt: -1 }).limit(5).toArray(),
+    ]);
+    if (!profile) return json(res, 404, error("Utilisateur introuvable"));
+    return json(res, 200, ok({
+      profile: {
+        ...privateUser(profile),
+        roles: authUser?.roles || ["USER"],
+        suspended: Boolean(profile.suspended || authUser?.suspended),
+        isActive: authUser?.isActive !== false,
+        suspendedReason: profile.suspendedReason || authUser?.suspendedReason || "",
+      },
+      auth: authUser ? {
+        id: String(authUser._id),
+        username: authUser.username,
+        email: authUser.email,
+        roles: authUser.roles || ["USER"],
+        isActive: authUser.isActive !== false,
+        suspended: Boolean(authUser.suspended),
+        isVerified: Boolean(authUser.isVerified),
+        createdAt: authUser.createdAt || "",
+        updatedAt: authUser.updatedAt || "",
+      } : null,
+      stats: { posts: postsCount, comments: commentsCount, reports: reportsCount },
+      recentPosts: recentPosts.map(normalizeDoc),
+      recentReports: recentReports.map(normalizeDoc),
+    }));
   }
 
   if (req.method === "PUT" && parts[0] === "users" && parts[2] === "roles") {

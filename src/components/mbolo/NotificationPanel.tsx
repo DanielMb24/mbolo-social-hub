@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { Bell, Heart, MessageCircle, Film, Check, X, UserPlus, Users } from "lucide-react";
+import { Bell, Heart, MessageCircle, Film, Check, X, UserPlus, Users, Shield } from "lucide-react";
 import { notificationApi } from "@/lib/api";
 
 export interface AppNotification {
   id: string;
-  type: "message" | "like" | "comment" | "story" | "follow" | "follow_request" | "group_request";
+  type: "message" | "like" | "comment" | "story" | "follow" | "follow_request" | "group_request" | "moderation";
   title: string;
   body: string;
   avatar?: string;
@@ -33,6 +33,7 @@ const iconForType = (type: AppNotification["type"]) => {
     case "follow":
     case "follow_request": return <UserPlus className="w-3.5 h-3.5 text-primary" />;
     case "group_request": return <Users className="w-3.5 h-3.5 text-secondary" />;
+    case "moderation": return <Shield className="w-3.5 h-3.5 text-destructive" />;
     default: return <Bell className="w-3.5 h-3.5 text-muted-foreground" />;
   }
 };

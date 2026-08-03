@@ -68,7 +68,7 @@ const Index = () => {
   const isMobile = useIsMobile();
   const isOnline = useOnlineStatus();
   const navigate = useNavigate();
-  const roles = getRolesFromToken();
+  const roles = currentUser?.roles?.length ? currentUser.roles.map((role) => role.toUpperCase()) : getRolesFromToken();
   const canAccessAdmin = roles.includes("ADMIN") || roles.includes("MODERATOR");
   const navItems = canAccessAdmin ? [...NAV_ITEMS, { id: "admin" as Tab, icon: ShieldCheck, label: "Admin" }] : NAV_ITEMS;
 
@@ -111,7 +111,7 @@ const Index = () => {
       const userId = localStorage.getItem('userId');
       if (userId) {
         try {
-          const profile = await userApi.getProfile(userId);
+          const profile = await authApi.getCurrentUser().catch(() => userApi.getProfile(userId));
           setCurrentUser(profile);
         } catch {
           setCurrentUser({ 

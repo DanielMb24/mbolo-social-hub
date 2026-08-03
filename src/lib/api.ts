@@ -60,6 +60,7 @@ export interface UserProfile {
   username: string;
   email: string;
   fullname?: string;
+  fullName?: string;
   bio?: string;
   avatarUrl?: string;
   location?: string;
@@ -248,6 +249,28 @@ export interface AdminOverview {
   recentReports: AdminReport[];
   recentUsers: UserProfile[];
   recentPosts: Post[];
+}
+
+export interface AdminUserDetail {
+  profile: UserProfile;
+  auth: {
+    id: string;
+    username: string;
+    email: string;
+    roles: string[];
+    isActive: boolean;
+    suspended: boolean;
+    isVerified: boolean;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+  stats: {
+    posts: number;
+    comments: number;
+    reports: number;
+  };
+  recentPosts: Post[];
+  recentReports: AdminReport[];
 }
 
 // Token management
@@ -742,7 +765,7 @@ export const storyApi = {
 
 export interface AppNotificationRecord {
   id: string;
-  type: "message" | "like" | "comment" | "story" | "follow" | "follow_request" | "group_request";
+  type: "message" | "like" | "comment" | "story" | "follow" | "follow_request" | "group_request" | "moderation";
   title: string;
   body: string;
   avatar?: string;
@@ -1019,6 +1042,10 @@ export const adminApi = {
       `/api/admin/users?page=${page}&size=${size}&q=${encodeURIComponent(query)}&_=${Date.now()}`
     );
     return response;
+  },
+  getUserDetail: async (userId: string) => {
+    const response = await api.get<ApiResponse<AdminUserDetail> | AdminUserDetail>(`/api/admin/users/${userId}?_=${Date.now()}`);
+    return unwrapApiData<AdminUserDetail>(response, null as unknown as AdminUserDetail);
   },
   updateUserRoles: (userId: string, roles: string[]) =>
     api.put<ApiResponse<{ userId: string; roles: string[] }> | { userId: string; roles: string[] }>(`/api/admin/users/${userId}/roles`, { roles }),

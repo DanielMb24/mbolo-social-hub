@@ -20,6 +20,7 @@ import {
   type AdminAuditLog,
   type AdminOverview,
   type AdminReport,
+  type AdminUserDetail,
   type PageResponse,
   type Post,
   type UserProfile,
@@ -73,6 +74,7 @@ const AdminPage = () => {
   const [users, setUsers] = useState<PageResponse<UserProfile>>(emptyPage);
   const [content, setContent] = useState<PageResponse<Post>>(emptyPage);
   const [audit, setAudit] = useState<PageResponse<AdminAuditLog>>(emptyPage);
+  const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUserDetail | null>(null);
   const [query, setQuery] = useState("");
   const [reportStatus, setReportStatus] = useState("ALL");
   const [loading, setLoading] = useState(true);
@@ -192,6 +194,18 @@ const AdminPage = () => {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Rôle non modifié");
       loadAll();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const showUserInfo = async (user: UserProfile) => {
+    setBusyId(user.id);
+    try {
+      const detail = await adminApi.getUserDetail(user.id);
+      setSelectedUserDetail(detail);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Infos utilisateur indisponibles");
     } finally {
       setBusyId(null);
     }
@@ -346,6 +360,7 @@ const AdminPage = () => {
                         {user.suspendedReason && <p className="mt-1 text-xs text-red-700">{user.suspendedReason}</p>}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <ActionButton disabled={busyId === user.id} onClick={() => showUserInfo(user)}>Infos</ActionButton>
                         <ActionButton disabled={busyId === user.id || !canAdmin} onClick={() => setRole(user, "USER")}>User</ActionButton>
                         <ActionButton disabled={busyId === user.id || !canAdmin} onClick={() => setRole(user, "MODERATOR")}>Modo</ActionButton>
                         <ActionButton disabled={busyId === user.id || !canAdmin} onClick={() => setRole(user, "ADMIN")}>Admin</ActionButton>
@@ -357,6 +372,44 @@ const AdminPage = () => {
                   ))}
                   {!users.content.length && <EmptyLine text="Aucun utilisateur trouvé" />}
                 </div>
+                {selectedUserDetail && (
+                  <section className="rounded-lg border bg-background">
+                    <div className="flex items-center justify-between border-b px-4 py-3">
+                      <div>
+                        <h2 className="text-sm font-semibold">Infos utilisateur</h2>
+                        <p className="text-xs text-muted-foreground">@{selectedUserDetail.profile.username}</p>
+                      </div>
+                      <button onClick={() => setSelectedUserDetail(null)} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-muted">Fermer</button>
+                    </div>
+                    <div className="grid gap-4 p-4 lg:grid-cols-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Identité</p>
+                        <p className="mt-2 text-sm">Email: {selectedUserDetail.profile.email || selectedUserDetail.auth?.email || "absent"}</p>
+                        <p className="text-sm">Nom: {selectedUserDetail.profile.fullname || selectedUserDetail.profile.fullName || "-"}</p>
+                        <p className="text-sm">Ville: {selectedUserDetail.profile.location || "-"}</p>
+                        <p className="text-sm">Visibilité: {selectedUserDetail.profile.profileVisibility || "PUBLIC"}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Compte</p>
+                        <p className="mt-2 text-sm">Rôles: {(selectedUserDetail.auth?.roles || selectedUserDetail.profile.roles || ["USER"]).join(", ")}</p>
+                        <p className="text-sm">Actif: {selectedUserDetail.auth?.isActive ? "oui" : "non"}</p>
+                        <p className="text-sm">Suspendu: {selectedUserDetail.profile.suspended ? "oui" : "non"}</p>
+                        <p className="text-sm">Vérifié: {selectedUserDetail.auth?.isVerified ? "oui" : "non"}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Activité</p>
+                        <p className="mt-2 text-sm">Posts: {selectedUserDetail.stats.posts}</p>
+                        <p className="text-sm">Commentaires: {selectedUserDetail.stats.comments}</p>
+                        <p className="text-sm">Signalements envoyés: {selectedUserDetail.stats.reports}</p>
+                        <p className="text-sm">Followers: {selectedUserDetail.profile.followersCount || 0}</p>
+                      </div>
+                    </div>
+                    <div className="grid gap-4 border-t p-4 lg:grid-cols-2">
+                      <RecentList title="Derniers posts de l'utilisateur" rows={selectedUserDetail.recentPosts.map((post) => post.content || `Post ${post.id}`)} />
+                      <RecentList title="Derniers signalements envoyés" rows={selectedUserDetail.recentReports.map((report) => `${report.contentType} · ${report.status} · ${report.reason}`)} />
+                    </div>
+                  </section>
+                )}
               </section>
             )}
 
