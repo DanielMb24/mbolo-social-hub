@@ -15,9 +15,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: VITE_API_URL
-        value: https://mbolo-gateway.onrender.com
+        value: ""
       - key: VITE_WS_URL
-        value: wss://mbolo-gateway.onrender.com
+        value: ""
 
   # ==================== API GATEWAY ====================
   - type: web

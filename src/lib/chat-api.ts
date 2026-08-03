@@ -52,7 +52,7 @@ export interface MessagesResponse {
 export const chatApi = {
   // Récupérer toutes les conversations de l'utilisateur
   getConversations: async (): Promise<Conversation[]> => {
-    const response = await api.get<Conversation[]>('/api/chat/conversations');
+    const response = await api.get<Conversation[]>(`/api/chat/conversations?_=${Date.now()}`);
     return response;
   },
 
@@ -74,7 +74,7 @@ export const chatApi = {
 
   // Récupérer les messages d'une conversation
   getMessages: async (conversationId: string, page = 0, size = 20): Promise<MessagesResponse> => {
-    const response = await api.get<MessagesResponse>(`/api/chat/messages/${conversationId}?page=${page}&size=${size}`);
+    const response = await api.get<MessagesResponse>(`/api/chat/messages/${conversationId}?page=${page}&size=${size}&_=${Date.now()}`);
     return response;
   },
 

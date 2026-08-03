@@ -2,7 +2,6 @@ import { Send, Phone, VideoIcon, MoreVertical, Search, Plus, Image, Mic, Smile, 
 import { lazy, Suspense, useCallback, useState, useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { chatApi, type Conversation, type Message } from "@/lib/chat-api";
-import { wsService } from "@/lib/websocket";
 import { toast } from "sonner";
 import { NewConversationDialog } from "./NewConversationDialog";
 import { AudioCallDialog } from "./AudioCallDialog";
@@ -24,13 +23,21 @@ import { useNavigate } from "react-router-dom";
 
 const EmojiPickerPanel = lazy(() => import("./EmojiPickerPanel"));
 
-interface ChatSocketPayload extends Partial<Message> {
-  type?: Message["type"] | "SEEN" | "DELETED" | "TYPING";
-  data?: string[];
-  userId?: string;
-  userName?: string;
-  messageId?: string;
-}
+const CHAT_POLL_INTERVAL_MS = 4000;
+
+const unwrapMessages = (data: unknown): Message[] => {
+  let msgs: Message[] = [];
+  if (data && typeof data === 'object') {
+    const dataObj = data as { data?: unknown; content?: unknown };
+    if (dataObj.data && typeof dataObj.data === 'object') {
+      const nested = dataObj.data as { content?: unknown };
+      if (Array.isArray(nested.content)) msgs = nested.content as Message[];
+    } else if (Array.isArray(dataObj.content)) msgs = dataObj.content as Message[];
+    else if (Array.isArray(dataObj.data)) msgs = dataObj.data as Message[];
+    else if (Array.isArray(data)) msgs = data as Message[];
+  }
+  return msgs.reverse();
+};
 
 const ChatPage = () => {
   const [selectedConvo, setSelectedConvo] = useState<string | null>(null);
@@ -58,6 +65,7 @@ const ChatPage = () => {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollInFlightRef = useRef(false);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
@@ -101,66 +109,47 @@ const ChatPage = () => {
     loadConversations();
   }, [fetchUserProfile]);
 
-  // Charger les messages et connecter WebSocket
+  const refreshMessages = useCallback(async (conversationId: string, options: { clearOnError?: boolean; markSeen?: boolean } = {}) => {
+    if (pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
+    try {
+      const data = await chatApi.getMessages(conversationId, 0, 50);
+      const nextMessages = unwrapMessages(data);
+      setMessages(prev => {
+        const prevSignature = prev.map(msg => `${msg.id}:${msg.updatedAt || msg.createdAt}:${msg.reactions?.length || 0}:${msg.seenBy?.length || 0}`).join("|");
+        const nextSignature = nextMessages.map(msg => `${msg.id}:${msg.updatedAt || msg.createdAt}:${msg.reactions?.length || 0}:${msg.seenBy?.length || 0}`).join("|");
+        return prevSignature === nextSignature ? prev : nextMessages;
+      });
+      if (options.markSeen !== false) {
+        chatApi.markConversationAsSeen(conversationId).catch(() => {});
+      }
+    } catch {
+      if (options.clearOnError) setMessages([]);
+    } finally {
+      pollInFlightRef.current = false;
+    }
+  }, []);
+
+  // Charger les messages et rafraîchir par polling compatible Vercel.
   useEffect(() => {
     if (!selectedConvo) return;
-    const loadMessages = async () => {
-      try {
-        const data = await chatApi.getMessages(selectedConvo, 0, 50);
-        let msgs: Message[] = [];
-        if (data && typeof data === 'object') {
-          const dataObj = data as { data?: unknown; content?: unknown };
-          if (dataObj.data && typeof dataObj.data === 'object') {
-            const nested = dataObj.data as { content?: unknown };
-            if (Array.isArray(nested.content)) msgs = nested.content as Message[];
-          } else if (Array.isArray(dataObj.content)) msgs = dataObj.content as Message[];
-          else if (Array.isArray(dataObj.data)) msgs = dataObj.data as Message[];
-          else if (Array.isArray(data)) msgs = data as Message[];
-        }
-        setMessages(msgs.reverse());
-        chatApi.markConversationAsSeen(selectedConvo).catch(() => {});
-      } catch (error) {
-        setMessages([]);
-      }
+    let active = true;
+    const tick = () => {
+      if (!active || document.visibilityState === "hidden") return;
+      refreshMessages(selectedConvo, { clearOnError: messages.length === 0 }).catch(() => undefined);
     };
-    loadMessages();
-
-    wsService.connect((raw: unknown) => {
-      const data = raw as ChatSocketPayload;
-      if (data.type === 'SEEN') {
-        setMessages(prev => prev.map(msg => {
-          if (data.data && Array.isArray(data.data) && data.data.includes(msg.id)) {
-            return { ...msg, seenBy: [...msg.seenBy, data.userId || ''] };
-          }
-          return msg;
-        }));
-      } else if (data.type === 'DELETED') {
-        setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
-      } else if (data.type === 'TYPING') {
-        const typingUserId = data.userId || '';
-        const typingUserName = data.userName || 'Utilisateur';
-        setTypingUsers(prev => ({ ...prev, [typingUserId]: typingUserName }));
-        setTimeout(() => {
-          setTypingUsers(prev => { const s = { ...prev }; delete s[typingUserId]; return s; });
-        }, 3000);
-      } else if (data.id && data.senderId && data.content) {
-        const msg: Message = {
-          id: data.id, conversationId: data.conversationId || selectedConvo || '',
-          senderId: data.senderId, content: data.content,
-          type: data.type || 'TEXT', createdAt: data.createdAt || new Date().toISOString(),
-          deleted: false, seenBy: data.seenBy || [], reactions: data.reactions || [],
-          senderName: data.senderName, replyTo: data.replyTo, mediaUrl: data.mediaUrl, starred: data.starred,
-        };
-        setMessages(prev => [...prev, msg]);
-        const currentUserId = localStorage.getItem('userId');
-        if (msg.senderId !== currentUserId) {
-          chatApi.markMessageAsSeen(msg.id).catch(() => {});
-        }
-      }
-    }, selectedConvo);
-
-    return () => { wsService.disconnect(); };
-  }, [selectedConvo]);
+    tick();
+    const intervalId = window.setInterval(tick, CHAT_POLL_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [selectedConvo, refreshMessages, messages.length]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +158,9 @@ const ChatPage = () => {
     setMessage('');
     setSending(true);
     try {
-      await chatApi.sendMessage(selectedConvo, messageContent);
+      const sent = await chatApi.sendMessage(selectedConvo, messageContent);
+      if (sent?.id) setMessages(prev => prev.some(msg => msg.id === sent.id) ? prev : [...prev, sent]);
+      refreshMessages(selectedConvo, { markSeen: false }).catch(() => undefined);
     } catch (error) {
       toast.error("Erreur lors de l'envoi");
       setMessage(messageContent);
@@ -184,7 +175,9 @@ const ChatPage = () => {
       setSending(true);
       const result = await api.uploadFile('/api/chat/upload', file, { conversationId: selectedConvo, type });
       if (result.url) {
-        await chatApi.sendMessage(selectedConvo, result.url, type);
+        const sent = await chatApi.sendMessage(selectedConvo, result.url, type);
+        if (sent?.id) setMessages(prev => prev.some(msg => msg.id === sent.id) ? prev : [...prev, sent]);
+        refreshMessages(selectedConvo, { markSeen: false }).catch(() => undefined);
         toast.success(type === 'IMAGE' ? 'Image envoyée' : 'Fichier envoyé');
       }
     } catch (error) {
@@ -277,7 +270,9 @@ const ChatPage = () => {
       const audioFile = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
       const result = await api.uploadFile('/api/chat/upload', audioFile, { conversationId: selectedConvo, type: 'AUDIO' });
       if (result.url) {
-        await chatApi.sendMessage(selectedConvo, result.url, 'AUDIO');
+        const sent = await chatApi.sendMessage(selectedConvo, result.url, 'AUDIO');
+        if (sent?.id) setMessages(prev => prev.some(msg => msg.id === sent.id) ? prev : [...prev, sent]);
+        refreshMessages(selectedConvo, { markSeen: false }).catch(() => undefined);
         toast.success('Message audio envoyé');
       }
     } catch (error) {

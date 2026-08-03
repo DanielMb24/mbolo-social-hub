@@ -15,7 +15,9 @@ class WebSocketService {
 
     let socket: SockJS;
     try {
-      socket = new SockJS(wsUrl);
+      socket = new SockJS(wsUrl, undefined, {
+        transports: ["websocket"],
+      });
     } catch (error) {
       console.warn("Connexion temps réel indisponible:", error);
       return;
@@ -94,8 +96,11 @@ export const wsService = new WebSocketService();
 
 function resolveSockJsUrl() {
   const configured = String(import.meta.env.VITE_WS_URL || "").trim();
-  const fallback = import.meta.env.DEV ? "http://localhost:8080/ws-chat" : `${window.location.origin}/ws-chat`;
-  let raw = configured || fallback;
+  if (!configured && import.meta.env.PROD) {
+    console.info("Chat temps réel désactivé: VITE_WS_URL n'est pas configuré.");
+    return "";
+  }
+  let raw = configured || "http://localhost:8080/ws-chat";
 
   if (raw.startsWith("ws://")) raw = raw.replace("ws://", "http://");
   if (raw.startsWith("wss://")) raw = raw.replace("wss://", "https://");

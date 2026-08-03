@@ -850,6 +850,10 @@ export class ChatWebSocket {
       console.error('No access token available for WebSocket connection');
       return;
     }
+    if (!WS_URL) {
+      console.info("WebSocket natif désactivé: VITE_WS_URL n'est pas configuré.");
+      return;
+    }
 
     this.ws = new WebSocket(`${WS_URL}/ws-chat?token=${token}`);
 
@@ -906,7 +910,8 @@ export class ChatWebSocket {
 
 function resolveNativeWsUrl() {
   const configured = String(import.meta.env.VITE_WS_URL || "").trim();
-  const fallback = import.meta.env.DEV ? "ws://localhost:8080" : window.location.origin;
+  const fallback = import.meta.env.DEV ? "ws://localhost:8080" : "";
+  if (!configured && import.meta.env.PROD) return "";
   let raw = configured || fallback;
   if (raw.startsWith("http://")) raw = raw.replace("http://", "ws://");
   if (raw.startsWith("https://")) raw = raw.replace("https://", "wss://");
