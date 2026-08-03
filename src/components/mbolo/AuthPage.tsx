@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Eye, EyeOff, MessageCircle, ArrowRight, Users, Shield, Heart, TrendingUp, Zap, Mail, Lock, User, CheckCircle, Sparkles, KeyRound } from "lucide-react";
 import { authApi, userApi } from "@/lib/api";
+import { getFriendlyErrorMessage } from "@/lib/error-notifier";
 import { toast } from "sonner";
 import { ForgotPasswordDialog } from "./ForgotPasswordDialog";
 import { GoogleLoginButton } from "./GoogleLoginButton";
@@ -46,9 +47,7 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
         }
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : (error as { response?: { data?: { message?: string } } })?.response?.data?.message || "Erreur d'authentification";
+      const errorMessage = getFriendlyErrorMessage(error, "Connexion impossible. Réessayez dans quelques instants.");
       toast.error('Erreur', { description: errorMessage });
     } finally {
       setLoading(false);
@@ -72,7 +71,7 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
       toast.success("Email vérifié", { description: "Bienvenue sur MBolo" });
       onLogin();
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Code invalide";
+      const errorMessage = getFriendlyErrorMessage(error, "Code invalide ou expiré.");
       toast.error("Erreur", { description: errorMessage });
     } finally {
       setLoading(false);
@@ -87,7 +86,7 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
       const message = await authApi.resendVerification(targetEmail);
       toast.success(message);
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Envoi impossible");
+      toast.error(getFriendlyErrorMessage(error, "Envoi impossible. Réessayez dans quelques instants."));
     } finally {
       setLoading(false);
     }
