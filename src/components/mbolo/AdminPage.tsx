@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import {
   adminApi,
+  authApi,
   tokenManager,
   type AdminAuditLog,
   type AdminOverview,
@@ -80,27 +81,24 @@ const AdminPage = () => {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [effectiveRoles, setEffectiveRoles] = useState<string[]>([]);
 
   const roles = useMemo(getRolesFromToken, []);
-  const canAdmin = roles.includes("ADMIN");
-  const canModerate = canAdmin || roles.includes("MODERATOR");
+  const currentRoles = effectiveRoles.length ? effectiveRoles : roles;
+  const canAdmin = currentRoles.includes("ADMIN");
 
   const loadAll = async () => {
-    if (!canModerate) {
-      setAccessDenied(true);
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     try {
-      const [overviewData, reportData, userData, contentData, auditData] = await Promise.all([
+      const [me, overviewData, reportData, userData, contentData, auditData] = await Promise.all([
+        authApi.getCurrentUser(),
         adminApi.getOverview(),
         adminApi.getReports(0, 20, reportStatus),
         adminApi.getUsers(0, 20, query),
         adminApi.getContent(0, 20),
         adminApi.getAudit(0, 30),
       ]);
+      setEffectiveRoles((me.roles || []).map((role) => role.toUpperCase()));
       setOverview(overviewData);
       setReports(reportData);
       setUsers(userData);
@@ -118,7 +116,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     loadAll();
-  }, [canModerate, reportStatus]);
+  }, [reportStatus]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

@@ -1412,15 +1412,19 @@ async function adminRoutes(req, res, parts) {
   const auth = currentAuth(req);
   const userId = auth?.userId || null;
   if (!userId) return json(res, 401, error("Non authentifié"));
-  if (!hasAnyRole(auth, ["ADMIN", "MODERATOR"])) return json(res, 403, error("Action interdite"));
+
+  const authDb = await serviceDb("auth");
+  const authUsers = authDb.collection(COLLECTIONS.authUsers);
+  const authUser = await authUsers.findOne({ _id: makeId(userId) });
+  const effectiveAuth = { ...auth, roles: authUser?.roles || auth?.roles || ["USER"] };
+  if (authUser?.suspended || authUser?.isActive === false) return json(res, 403, error("Compte suspendu"));
+  if (!hasAnyRole(effectiveAuth, ["ADMIN", "MODERATOR"])) return json(res, 403, error("Action interdite"));
 
   const userDb = await serviceDb("user");
   const postDb = await serviceDb("post");
   const moderationDb = await serviceDb("moderation");
-  const authDb = await serviceDb("auth");
 
   const profiles = userDb.collection(COLLECTIONS.userProfiles);
-  const authUsers = authDb.collection(COLLECTIONS.authUsers);
   const posts = postDb.collection(COLLECTIONS.posts);
   const comments = postDb.collection(COLLECTIONS.comments);
   const stories = postDb.collection(COLLECTIONS.stories);
@@ -1544,7 +1548,7 @@ async function adminRoutes(req, res, parts) {
   }
 
   if (req.method === "PUT" && parts[0] === "users" && parts[2] === "roles") {
-    if (!hasAnyRole(auth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
+    if (!hasAnyRole(effectiveAuth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
     const targetId = validateId(parts[1], "Utilisateur");
     const body = await readBody(req);
     const allowedRoles = new Set(["USER", "MODERATOR", "ADMIN"]);
