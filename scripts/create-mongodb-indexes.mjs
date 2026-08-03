@@ -25,6 +25,16 @@ try {
     { key: { userId: 1, revokedAt: 1 }, name: "refresh_user_revoked" },
     { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: "refresh_expiry_ttl" },
   ]);
+  await authDb.collection("password_reset_tokens").createIndexes([
+    { key: { email: 1, purpose: 1, createdAt: -1 }, name: "password_reset_email_purpose_created" },
+    { key: { userId: 1, purpose: 1, consumedAt: 1 }, name: "password_reset_user_purpose_consumed" },
+    { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: "password_reset_expiry_ttl" },
+  ]);
+  await authDb.collection("email_verification_codes").createIndexes([
+    { key: { email: 1, purpose: 1, createdAt: -1 }, name: "email_codes_email_purpose_created" },
+    { key: { userId: 1, purpose: 1, consumedAt: 1 }, name: "email_codes_user_purpose_consumed" },
+    { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: "email_codes_expiry_ttl" },
+  ]);
 
   const userDb = client.db(dbName("user"));
   await userDb.collection("user_profiles").createIndexes([

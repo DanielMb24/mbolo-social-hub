@@ -2,6 +2,7 @@ export const COLLECTIONS = {
   authUsers: "users_auth",
   refreshTokens: "refresh_tokens",
   passwordResetTokens: "password_reset_tokens",
+  emailVerificationCodes: "email_verification_codes",
   userProfiles: "users_profile",
   userFollows: "user_follows",
   userFollowRequests: "user_follow_requests",
@@ -19,4 +20,5 @@ export const COLLECTIONS = {
   messages: "messages",
   reports: "reports",
   auditLogs: "audit_logs",
+  platformSettings: "platform_settings",
 };

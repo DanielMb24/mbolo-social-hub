@@ -18,9 +18,10 @@ import {
   verifyToken,
 } from "./_lib.js";
 import { isCloudinaryConfigured, uploadToCloudinary } from "./_cloudinary.js";
+import { randomInt } from "node:crypto";
 import { COLLECTIONS } from "./_collections.js";
 import { applySecurityHeaders, clearRefreshCookie, randomTokenId, setRefreshCookie } from "./_http.js";
-import { isEmailConfigured, sendNotificationEmail } from "./_smtp-mailer.js";
+import { isEmailConfigured, sendMail, sendNotificationEmail } from "./_smtp-mailer.js";
 import {
   escapeRegex,
   parsePagination,
@@ -70,10 +71,17 @@ async function authRoutes(req, res, parts) {
   const userDb = await serviceDb("user");
   const users = authDb.collection(COLLECTIONS.authUsers);
   const refreshTokens = authDb.collection(COLLECTIONS.refreshTokens);
+  const resetTokens = authDb.collection(COLLECTIONS.passwordResetTokens);
+  const emailCodes = authDb.collection(COLLECTIONS.emailVerificationCodes);
   const profiles = userDb.collection(COLLECTIONS.userProfiles);
   const body = await readBody(req);
 
   if (req.method === "POST" && parts[0] === "register") {
+    const moderationDb = await serviceDb("moderation");
+    const settings = await getPlatformSettings(moderationDb.collection(COLLECTIONS.platformSettings));
+    if (settings.maintenanceMode) return json(res, 503, error("Plateforme en maintenance"));
+    if (!settings.registrationEnabled) return json(res, 403, error("Les inscriptions sont temporairement fermées"));
+
     const username = requireUsername(body.username);
     const email = requireEmail(body.email);
     const password = requirePassword(body.password);
@@ -100,13 +108,21 @@ async function authRoutes(req, res, parts) {
       fullname: body.fullName || body.fullname || "",
       bio: "",
       blockedUsers: [],
-      profileVisibility: "PUBLIC",
+      profileVisibility: settings.defaultProfileVisibility || "PUBLIC",
       followersCount: 0,
       followingCount: 0,
       createdAt: now,
       updatedAt: now,
     });
-    return issueSession(res, refreshTokens, String(result.insertedId), username, ["USER"]);
+    const userId = String(result.insertedId);
+    await createAndSendCode(emailCodes, {
+      userId,
+      email,
+      purpose: "EMAIL_VERIFY",
+      subject: "Votre code de vérification MBolo",
+      intro: "Bienvenue sur MBolo. Entrez ce code pour valider votre adresse email.",
+    });
+    return json(res, 200, ok({ userId, email, requiresEmailVerification: true }, "Code de vérification envoyé"));
   }
 
   if (req.method === "POST" && parts[0] === "login") {
@@ -118,7 +134,51 @@ async function authRoutes(req, res, parts) {
     if (user.suspended || user.isActive === false) {
       return json(res, 403, error("Compte suspendu. Contactez l'administration."));
     }
+    if (!user.isVerified) {
+      await createAndSendCode(emailCodes, {
+        userId: String(user._id),
+        email: user.email,
+        purpose: "EMAIL_VERIFY",
+        subject: "Votre code de vérification MBolo",
+        intro: "Votre compte MBolo doit être vérifié. Entrez ce code pour continuer.",
+      });
+      return json(res, 403, {
+        success: false,
+        message: "Email non vérifié. Un nouveau code vient d'être envoyé.",
+        data: { userId: String(user._id), email: user.email, requiresEmailVerification: true },
+      });
+    }
     return issueSession(res, refreshTokens, String(user._id), user.username, user.roles || ["USER"]);
+  }
+
+  if (req.method === "POST" && parts[0] === "verify-email") {
+    const email = requireEmail(body.email);
+    const code = requireString(body.code || body.otp, "Code", { min: 6, max: 6 });
+    const user = await users.findOne({ email });
+    if (!user) return json(res, 400, error("Code invalide"));
+    const verified = await consumeCode(emailCodes, { email, code, purpose: "EMAIL_VERIFY" });
+    if (!verified) return json(res, 400, error("Code invalide ou expiré"));
+    const now = new Date().toISOString();
+    await Promise.all([
+      users.updateOne({ _id: user._id }, { $set: { isVerified: true, verifiedAt: now, updatedAt: now } }),
+      profiles.updateOne({ _id: user._id }, { $set: { isVerified: true, verifiedAt: now, updatedAt: now } }),
+    ]);
+    return issueSession(res, refreshTokens, String(user._id), user.username, user.roles || ["USER"]);
+  }
+
+  if (req.method === "POST" && parts[0] === "resend-verification") {
+    const email = requireEmail(body.email);
+    const user = await users.findOne({ email });
+    if (user && !user.isVerified) {
+      await createAndSendCode(emailCodes, {
+        userId: String(user._id),
+        email,
+        purpose: "EMAIL_VERIFY",
+        subject: "Votre code de vérification MBolo",
+        intro: "Voici votre nouveau code de vérification MBolo.",
+      });
+    }
+    return json(res, 200, ok(null, "Si ce compte existe, un code vient d'être envoyé."));
   }
 
   if (req.method === "POST" && parts[0] === "refresh") {
@@ -157,11 +217,35 @@ async function authRoutes(req, res, parts) {
   }
 
   if (req.method === "POST" && parts[0] === "forgot-password") {
-    return json(res, 200, { message: "Si ce compte existe, un lien de réinitialisation sera envoyé." });
+    const email = requireEmail(body.email);
+    const user = await users.findOne({ email });
+    if (user && user.isActive !== false && !user.suspended) {
+      await createAndSendCode(resetTokens, {
+        userId: String(user._id),
+        email,
+        purpose: "PASSWORD_RESET",
+        subject: "Code de réinitialisation MBolo",
+        intro: "Entrez ce code pour réinitialiser votre mot de passe MBolo.",
+      });
+    }
+    return json(res, 200, ok(null, "Si ce compte existe, un code de réinitialisation vient d'être envoyé."));
   }
 
   if (req.method === "POST" && parts[0] === "reset-password") {
-    return json(res, 200, { message: "Réinitialisation indisponible sur le backend serverless minimal." });
+    const email = requireEmail(body.email);
+    const code = requireString(body.otp || body.code, "Code", { min: 6, max: 6 });
+    const newPassword = requirePassword(body.newPassword || body.password);
+    const user = await users.findOne({ email });
+    if (!user) return json(res, 400, error("Code invalide ou expiré"));
+    const verified = await consumeCode(resetTokens, { email, code, purpose: "PASSWORD_RESET" });
+    if (!verified) return json(res, 400, error("Code invalide ou expiré"));
+    const passwordHash = hashPassword(newPassword);
+    await users.updateOne(
+      { _id: user._id },
+      { $set: { password: passwordHash, passwordHash, updatedAt: new Date().toISOString() }, $unset: { suspendedReason: "" } }
+    );
+    await refreshTokens.updateMany({ userId: String(user._id), revokedAt: { $exists: false } }, { $set: { revokedAt: new Date().toISOString() } });
+    return json(res, 200, ok(null, "Mot de passe réinitialisé. Vous pouvez vous reconnecter."));
   }
 
   if (req.method === "POST" && parts[0] === "google") {
@@ -190,6 +274,67 @@ async function issueSession(res, refreshTokens, userId, username, roles = ["USER
     userId,
     username,
   }, "Authentifié"));
+}
+
+function generateOtp() {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+function hashCode(code) {
+  return hashPassword(String(code));
+}
+
+async function createAndSendCode(collection, { userId, email, purpose, subject, intro }) {
+  const code = generateOtp();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+  await collection.updateMany(
+    { email, purpose, consumedAt: { $exists: false } },
+    { $set: { consumedAt: now.toISOString(), consumedReason: "replaced" } }
+  );
+  await collection.insertOne({
+    userId,
+    email,
+    purpose,
+    codeHash: hashCode(code),
+    attempts: 0,
+    createdAt: now.toISOString(),
+    expiresAt,
+  });
+  if (!isEmailConfigured()) {
+    const err = new Error("SMTP non configuré: impossible d'envoyer le code email");
+    err.status = 503;
+    throw err;
+  }
+  await sendMail({
+    to: email,
+    subject,
+    text: [
+      intro,
+      "",
+      `Code: ${code}`,
+      "",
+      "Ce code expire dans 15 minutes.",
+      "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.",
+    ].join("\n"),
+  });
+}
+
+async function consumeCode(collection, { email, code, purpose }) {
+  const doc = await collection.findOne({ email, purpose, consumedAt: { $exists: false } }, { sort: { createdAt: -1 } });
+  if (!doc) return false;
+  const now = new Date();
+  if (new Date(doc.expiresAt).getTime() < now.getTime() || Number(doc.attempts || 0) >= 5) {
+    await collection.updateOne({ _id: doc._id }, { $set: { consumedAt: now.toISOString(), consumedReason: "expired" } });
+    return false;
+  }
+  const okCode = verifyPassword(String(code), doc.codeHash);
+  if (!okCode) {
+    await collection.updateOne({ _id: doc._id }, { $inc: { attempts: 1 }, $set: { lastAttemptAt: now.toISOString() } });
+    return false;
+  }
+  await collection.updateOne({ _id: doc._id }, { $set: { consumedAt: now.toISOString(), consumedReason: "used" } });
+  return true;
 }
 
 async function userRoutes(req, res, parts) {
@@ -1434,6 +1579,7 @@ async function adminRoutes(req, res, parts) {
   const notifications = postDb.collection(COLLECTIONS.notifications);
   const reports = moderationDb.collection(COLLECTIONS.reports);
   const auditLogs = moderationDb.collection(COLLECTIONS.auditLogs);
+  const platformSettings = moderationDb.collection(COLLECTIONS.platformSettings);
 
   if (req.method === "GET" && parts[0] === "overview") {
     const [
@@ -1715,6 +1861,70 @@ async function adminRoutes(req, res, parts) {
     return json(res, 200, ok({ sent: recipients.length }));
   }
 
+  if (req.method === "GET" && parts[0] === "communities") {
+    const url = new URL(req.url, "http://localhost");
+    const { page, size } = parsePagination(url);
+    const type = validateSearch(url.searchParams.get("type")).toUpperCase() || "GROUP";
+    const q = validateSearch(url.searchParams.get("q"));
+    const collection = type === "PAGE" ? pages : type === "GROUP" ? groups : null;
+    if (!collection) return json(res, 400, error("Type de communauté invalide"));
+    const search = q ? { $regex: escapeRegex(q), $options: "i" } : null;
+    const filter = search ? { $or: [{ name: search }, { description: search }, { category: search }, { ownerId: q }] } : {};
+    const total = await collection.countDocuments(filter);
+    const rows = await collection.find(filter).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    return json(res, 200, pageResult(rows.map(normalizeDoc), page, size, total));
+  }
+
+  if (req.method === "DELETE" && parts[0] === "communities" && parts[1] && parts[2]) {
+    if (!hasAnyRole(effectiveAuth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
+    const type = requireString(parts[1], "Type", { min: 3, max: 10 }).toUpperCase();
+    const communityId = validateId(parts[2], "Communauté");
+    if (type === "GROUP") {
+      await Promise.all([
+        groups.deleteOne({ _id: makeId(communityId) }),
+        postDb.collection(COLLECTIONS.groupMembers).deleteMany({ groupId: communityId }),
+        posts.deleteMany({ targetType: "GROUP", targetId: communityId }),
+      ]);
+    } else if (type === "PAGE") {
+      await Promise.all([
+        pages.deleteOne({ _id: makeId(communityId) }),
+        postDb.collection(COLLECTIONS.pageFollowers).deleteMany({ pageId: communityId }),
+        posts.deleteMany({ targetType: "PAGE", targetId: communityId }),
+      ]);
+    } else {
+      return json(res, 400, error("Type de communauté invalide"));
+    }
+    await writeAuditLog(auditLogs, userId, `${type}_DELETED`, { communityId });
+    return json(res, 200, ok({ id: communityId, type }, "Communauté supprimée"));
+  }
+
+  if (req.method === "GET" && parts[0] === "settings") {
+    return json(res, 200, ok(await getPlatformSettings(platformSettings)));
+  }
+
+  if (req.method === "PUT" && parts[0] === "settings") {
+    if (!hasAnyRole(effectiveAuth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
+    const body = await readBody(req);
+    const current = await getPlatformSettings(platformSettings);
+    const next = {
+      ...current,
+      registrationEnabled: typeof body.registrationEnabled === "boolean" ? body.registrationEnabled : current.registrationEnabled,
+      maintenanceMode: typeof body.maintenanceMode === "boolean" ? body.maintenanceMode : current.maintenanceMode,
+      defaultProfileVisibility: ["PUBLIC", "PRIVATE"].includes(String(body.defaultProfileVisibility || "").toUpperCase())
+        ? String(body.defaultProfileVisibility).toUpperCase()
+        : current.defaultProfileVisibility,
+      updatedAt: new Date().toISOString(),
+      updatedBy: userId,
+    };
+    await platformSettings.updateOne({ _id: "main" }, { $set: next }, { upsert: true });
+    await writeAuditLog(auditLogs, userId, "SETTINGS_UPDATED", {
+      registrationEnabled: next.registrationEnabled,
+      maintenanceMode: next.maintenanceMode,
+      defaultProfileVisibility: next.defaultProfileVisibility,
+    });
+    return json(res, 200, ok(next));
+  }
+
   if (req.method === "GET" && parts[0] === "audit") {
     const url = new URL(req.url, "http://localhost");
     const { page, size } = parsePagination(url);
@@ -1733,6 +1943,19 @@ async function writeAuditLog(auditLogs, actorId, action, details = {}) {
     details,
     createdAt: new Date().toISOString(),
   });
+}
+
+async function getPlatformSettings(platformSettings) {
+  const defaults = {
+    id: "main",
+    registrationEnabled: true,
+    maintenanceMode: false,
+    defaultProfileVisibility: "PUBLIC",
+    updatedAt: "",
+    updatedBy: "",
+  };
+  const stored = await platformSettings.findOne({ _id: "main" });
+  return stored ? { ...defaults, ...normalizeDoc(stored), id: "main" } : defaults;
 }
 
 async function deletePostCascade(posts, comments, postId) {

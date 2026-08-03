@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff, MessageCircle, ArrowRight, Users, Shield, Heart, TrendingUp, Zap, Mail, Lock, User, CheckCircle, Sparkles } from "lucide-react";
+import { Eye, EyeOff, MessageCircle, ArrowRight, Users, Shield, Heart, TrendingUp, Zap, Mail, Lock, User, CheckCircle, Sparkles, KeyRound } from "lucide-react";
 import { authApi, userApi } from "@/lib/api";
 import { toast } from "sonner";
 import { ForgotPasswordDialog } from "./ForgotPasswordDialog";
@@ -9,7 +9,7 @@ interface AuthPageProps {
   onLogin: () => void;
 }
 
-type ViewMode = "login" | "register";
+type ViewMode = "login" | "register" | "verify-email";
 
 const AuthPage = ({ onLogin }: AuthPageProps) => {
   const [viewMode, setViewMode] = useState<ViewMode>("login");
@@ -18,6 +18,8 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [pendingEmail, setPendingEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,26 +38,56 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
         onLogin();
       } else if (viewMode === "register") {
         const response = await authApi.register({ username, email, password });
-        if (!response.accessToken || !response.userId) throw new Error('Réponse invalide');
-        
-        localStorage.setItem('token', response.accessToken);
-        localStorage.setItem('userId', response.userId);
-        localStorage.setItem('username', username);
-        
-        try {
-          await userApi.updateProfile(response.userId, {
-            username, email, fullname: username, bio: 'Nouveau membre de MBolo'
-          });
-        } catch (e) { console.log('Profile creation skipped'); }
-        
-        toast.success('Bienvenue sur MBolo', { description: 'Inscription réussie' });
-        onLogin();
+        if (response.requiresEmailVerification) {
+          setPendingEmail(response.email || email);
+          setViewMode("verify-email");
+          toast.success("Code envoyé", { description: `Vérifie ${response.email || email}` });
+          return;
+        }
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error 
         ? error.message 
         : (error as { response?: { data?: { message?: string } } })?.response?.data?.message || "Erreur d'authentification";
       toast.error('Erreur', { description: errorMessage });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (verificationCode.length !== 6) {
+      toast.error("Le code doit contenir 6 chiffres");
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await authApi.verifyEmail(pendingEmail || email, verificationCode);
+      if (!response.accessToken || !response.userId) throw new Error("Réponse invalide");
+      localStorage.setItem('token', response.accessToken);
+      localStorage.setItem('accessToken', response.accessToken);
+      localStorage.setItem('userId', response.userId);
+      localStorage.setItem('username', response.username || username);
+      toast.success("Email vérifié", { description: "Bienvenue sur MBolo" });
+      onLogin();
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Code invalide";
+      toast.error("Erreur", { description: errorMessage });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendVerificationCode = async () => {
+    const targetEmail = pendingEmail || email;
+    if (!targetEmail) return;
+    setLoading(true);
+    try {
+      const message = await authApi.resendVerification(targetEmail);
+      toast.success(message);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Envoi impossible");
     } finally {
       setLoading(false);
     }
@@ -155,10 +187,17 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
                     Rejoins-nous
                   </>
                 )}
+                {viewMode === "verify-email" && (
+                  <>
+                    <KeyRound className="w-6 h-6 sm:w-7 sm:h-7 text-accent" />
+                    Vérifie ton email
+                  </>
+                )}
               </h2>
               <p className="text-muted-foreground text-xs sm:text-sm">
                 {viewMode === "login" && "Connecte-toi pour retrouver ta communauté"}
                 {viewMode === "register" && "Crée ton compte en quelques secondes"}
+                {viewMode === "verify-email" && `Entre le code envoyé à ${pendingEmail || email}`}
               </p>
             </div>
 
@@ -368,6 +407,53 @@ const AuthPage = ({ onLogin }: AuthPageProps) => {
                   {" "}et notre{" "}
                   <button className="text-accent hover:underline">Politique de confidentialité</button>
                 </p>
+              </form>
+            )}
+
+            {viewMode === "verify-email" && (
+              <form onSubmit={handleVerifyEmail} className="space-y-3 sm:space-y-4">
+                <div>
+                  <label className="text-xs sm:text-sm font-semibold text-foreground block mb-1.5 sm:mb-2">
+                    <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1.5 sm:mr-2" />
+                    Code de vérification <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="123456"
+                    required
+                    maxLength={6}
+                    className="input-modern text-center text-lg tracking-widest"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="btn-accent w-full py-2.5 sm:py-3 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? (
+                    <>
+                      <div className="w-4 h-4 sm:w-5 sm:h-5 border-2 border-accent-foreground/30 border-t-accent-foreground rounded-full animate-spin" />
+                      <span className="font-semibold text-sm sm:text-base">Vérification...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5" />
+                      <span className="font-semibold text-sm sm:text-base">Valider mon email</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="flex items-center justify-between text-xs sm:text-sm">
+                  <button type="button" onClick={() => setViewMode("register")} className="text-muted-foreground hover:underline">
+                    Modifier l'email
+                  </button>
+                  <button type="button" onClick={resendVerificationCode} disabled={loading} className="text-accent font-bold hover:underline disabled:opacity-50">
+                    Renvoyer le code
+                  </button>
+                </div>
               </form>
             )}
           </div>

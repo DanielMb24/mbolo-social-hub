@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   FileText,
   Mail,
+  Settings,
   RefreshCw,
   Search,
   Shield,
@@ -23,16 +24,20 @@ import {
   authApi,
   tokenManager,
   type AdminAuditLog,
+  type AdminCommunityType,
   type AdminContentType,
   type AdminOverview,
+  type AdminPlatformSettings,
   type AdminReport,
   type AdminUserDetail,
   type PageResponse,
   type Post,
+  type SocialGroup,
+  type SocialPage,
   type UserProfile,
 } from "@/lib/api";
 
-type AdminTab = "overview" | "reports" | "users" | "content" | "broadcast" | "audit";
+type AdminTab = "overview" | "reports" | "users" | "content" | "communities" | "broadcast" | "settings" | "audit";
 
 const emptyPage = <T,>(): PageResponse<T> => ({
   content: [],
@@ -79,12 +84,16 @@ const AdminPage = () => {
   const [reports, setReports] = useState<PageResponse<AdminReport>>(emptyPage);
   const [users, setUsers] = useState<PageResponse<UserProfile>>(emptyPage);
   const [content, setContent] = useState<PageResponse<Post>>(emptyPage);
+  const [communities, setCommunities] = useState<PageResponse<SocialGroup | SocialPage>>(emptyPage);
   const [audit, setAudit] = useState<PageResponse<AdminAuditLog>>(emptyPage);
+  const [settings, setSettings] = useState<AdminPlatformSettings | null>(null);
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUserDetail | null>(null);
   const [query, setQuery] = useState("");
   const [reportStatus, setReportStatus] = useState("ALL");
   const [contentType, setContentType] = useState<AdminContentType>("POST");
   const [contentQuery, setContentQuery] = useState("");
+  const [communityType, setCommunityType] = useState<AdminCommunityType>("GROUP");
+  const [communityQuery, setCommunityQuery] = useState("");
   const [broadcastTitle, setBroadcastTitle] = useState("");
   const [broadcastBody, setBroadcastBody] = useState("");
   const [broadcastTarget, setBroadcastTarget] = useState<"ALL" | "ACTIVE">("ACTIVE");
@@ -100,12 +109,14 @@ const AdminPage = () => {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [me, overviewData, reportData, userData, contentData, auditData] = await Promise.all([
+      const [me, overviewData, reportData, userData, contentData, communityData, settingsData, auditData] = await Promise.all([
         authApi.getCurrentUser(),
         adminApi.getOverview(),
         adminApi.getReports(0, 20, reportStatus),
         adminApi.getUsers(0, 20, query),
         adminApi.getContent(0, 20, contentType, contentQuery),
+        adminApi.getCommunities(0, 20, communityType, communityQuery),
+        adminApi.getSettings(),
         adminApi.getAudit(0, 30),
       ]);
       setEffectiveRoles((me.roles || []).map((role) => role.toUpperCase()));
@@ -113,6 +124,8 @@ const AdminPage = () => {
       setReports(reportData);
       setUsers(userData);
       setContent(contentData);
+      setCommunities(communityData);
+      setSettings(settingsData);
       setAudit(auditData);
       setAccessDenied(false);
     } catch (error) {
@@ -126,7 +139,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     loadAll();
-  }, [reportStatus, contentType]);
+  }, [reportStatus, contentType, communityType]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -145,6 +158,15 @@ const AdminPage = () => {
     }, 350);
     return () => window.clearTimeout(timer);
   }, [contentQuery, contentType, activeTab]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (activeTab === "communities") {
+        adminApi.getCommunities(0, 20, communityType, communityQuery).then(setCommunities).catch(() => undefined);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [communityQuery, communityType, activeTab]);
 
   const resolveReport = async (report: AdminReport, action: "APPROVE" | "REJECT" | "BAN" | "DELETE") => {
     setBusyId(report.id);
@@ -290,12 +312,49 @@ const AdminPage = () => {
     }
   };
 
+  const deleteCommunity = async (communityId: string) => {
+    if (!window.confirm("Supprimer cette communauté et ses contenus associés ?")) return;
+    setBusyId(communityId);
+    const previous = communities;
+    setCommunities((page) => ({ ...page, content: page.content.filter((item) => item.id !== communityId) }));
+    try {
+      await adminApi.deleteCommunity(communityType, communityId);
+      toast.success("Communauté supprimée");
+      loadAll();
+    } catch (error) {
+      setCommunities(previous);
+      toast.error(error instanceof Error ? error.message : "Suppression impossible");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const saveSettings = async (next: Partial<AdminPlatformSettings>) => {
+    if (!canAdmin || !settings) return toast.error("Action réservée aux admins");
+    const previous = settings;
+    const optimistic = { ...settings, ...next };
+    setSettings(optimistic);
+    setBusyId("settings");
+    try {
+      const updated = await adminApi.updateSettings(optimistic);
+      setSettings(updated);
+      toast.success("Réglages enregistrés");
+      loadAll();
+    } catch (error) {
+      setSettings(previous);
+      toast.error(error instanceof Error ? error.message : "Réglage impossible");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const loadPage = async (kind: AdminTab, page: number) => {
     setLoading(true);
     try {
       if (kind === "reports") setReports(await adminApi.getReports(page, reports.size, reportStatus));
       if (kind === "users") setUsers(await adminApi.getUsers(page, users.size, query));
       if (kind === "content") setContent(await adminApi.getContent(page, content.size, contentType, contentQuery));
+      if (kind === "communities") setCommunities(await adminApi.getCommunities(page, communities.size, communityType, communityQuery));
       if (kind === "audit") setAudit(await adminApi.getAudit(page, audit.size));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Chargement impossible");
@@ -345,7 +404,9 @@ const AdminPage = () => {
             ["reports", "Signalements", AlertTriangle],
             ["users", "Utilisateurs", Users],
             ["content", "Contenus", FileText],
+            ["communities", "Espaces", Users],
             ["broadcast", "Diffusion", Mail],
+            ["settings", "Réglages", Settings],
             ["audit", "Audit", UserCog],
           ].map(([id, label, Icon]) => (
             <button
@@ -555,6 +616,85 @@ const AdminPage = () => {
               </section>
             )}
 
+            {activeTab === "communities" && (
+              <section className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <select value={communityType} onChange={(event) => setCommunityType(event.target.value as AdminCommunityType)} className="rounded-lg border bg-background px-3 py-2 text-sm">
+                    <option value="GROUP">Groupes</option>
+                    <option value="PAGE">Pages</option>
+                  </select>
+                  <div className="relative min-w-[240px]">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <input value={communityQuery} onChange={(event) => setCommunityQuery(event.target.value)} placeholder="Chercher nom, catégorie, propriétaire" className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-sm" />
+                  </div>
+                </div>
+                <div className="overflow-hidden rounded-lg border bg-background">
+                  {communities.content.map((item) => (
+                    <div key={item.id} className="grid gap-3 border-b p-4 last:border-b-0 lg:grid-cols-[1fr_auto]">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">{item.name}</span>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{communityType}</span>
+                          {"visibility" in item && <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{item.visibility}</span>}
+                          {"category" in item && <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{item.category}</span>}
+                        </div>
+                        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{item.description || "Aucune description"}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Propriétaire: {item.ownerId} · {communityType === "GROUP" ? `${(item as SocialGroup).membersCount || 0} membres` : `${(item as SocialPage).followersCount || 0} abonnés`}
+                        </p>
+                      </div>
+                      <button disabled={busyId === item.id || !canAdmin} onClick={() => deleteCommunity(item.id)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 px-3 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">
+                        <Trash2 className="h-4 w-4" />
+                        Supprimer
+                      </button>
+                    </div>
+                  ))}
+                  {!communities.content.length && <EmptyLine text="Aucun espace trouvé" />}
+                </div>
+                <Pager page={communities} onPage={(page) => loadPage("communities", page)} />
+              </section>
+            )}
+
+            {activeTab === "settings" && settings && (
+              <section className="rounded-lg border bg-background">
+                <div className="border-b px-4 py-3">
+                  <h2 className="text-sm font-semibold">Réglages plateforme</h2>
+                  <p className="text-xs text-muted-foreground">Contrôles globaux appliqués côté serveur.</p>
+                </div>
+                <div className="divide-y">
+                  <SettingRow
+                    title="Inscriptions"
+                    description="Autoriser la création de nouveaux comptes."
+                    active={settings.registrationEnabled}
+                    disabled={busyId === "settings" || !canAdmin}
+                    onToggle={() => saveSettings({ registrationEnabled: !settings.registrationEnabled })}
+                  />
+                  <SettingRow
+                    title="Maintenance"
+                    description="Bloquer temporairement les nouvelles inscriptions pendant une intervention."
+                    active={settings.maintenanceMode}
+                    disabled={busyId === "settings" || !canAdmin}
+                    onToggle={() => saveSettings({ maintenanceMode: !settings.maintenanceMode })}
+                  />
+                  <div className="grid gap-2 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                    <div>
+                      <p className="text-sm font-medium">Visibilité par défaut</p>
+                      <p className="text-xs text-muted-foreground">Valeur appliquée aux nouveaux profils.</p>
+                    </div>
+                    <select
+                      value={settings.defaultProfileVisibility}
+                      disabled={busyId === "settings" || !canAdmin}
+                      onChange={(event) => saveSettings({ defaultProfileVisibility: event.target.value as "PUBLIC" | "PRIVATE" })}
+                      className="rounded-lg border bg-background px-3 py-2 text-sm disabled:opacity-50"
+                    >
+                      <option value="PUBLIC">Public</option>
+                      <option value="PRIVATE">Privé</option>
+                    </select>
+                  </div>
+                </div>
+              </section>
+            )}
+
             {activeTab === "audit" && (
               <section className="space-y-3">
                 <div className="overflow-hidden rounded-lg border bg-background">
@@ -627,6 +767,34 @@ const Pager = <T,>({ page, onPage }: { page: PageResponse<T>; onPage: (page: num
     </div>
   );
 };
+
+const SettingRow = ({
+  title,
+  description,
+  active,
+  disabled,
+  onToggle,
+}: {
+  title: string;
+  description: string;
+  active: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) => (
+  <div className="grid gap-3 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+    <div>
+      <p className="text-sm font-medium">{title}</p>
+      <p className="text-xs text-muted-foreground">{description}</p>
+    </div>
+    <button
+      disabled={disabled}
+      onClick={onToggle}
+      className={`h-8 w-14 rounded-full border p-1 transition-colors disabled:opacity-50 ${active ? "bg-primary" : "bg-muted"}`}
+    >
+      <span className={`block h-5 w-5 rounded-full bg-background transition-transform ${active ? "translate-x-6" : "translate-x-0"}`} />
+    </button>
+  </div>
+);
 
 const RecentList = ({ title, rows }: { title: string; rows: string[] }) => (
   <section className="rounded-lg border bg-background">

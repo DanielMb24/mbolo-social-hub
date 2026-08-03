@@ -13,7 +13,7 @@ export interface ResetPasswordRequest {
 export const authApi = {
   forgotPassword: async (email: string): Promise<string> => {
     const response = await api.post<{ message?: string }>('/api/auth/forgot-password', { email });
-    return response.message || 'Un code de vérification a été envoyé à votre email.';
+    return response.message || 'Si ce compte existe, un code de vérification a été envoyé.';
   },
 
   resetPassword: async (data: ResetPasswordRequest): Promise<string> => {

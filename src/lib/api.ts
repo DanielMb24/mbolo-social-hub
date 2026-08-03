@@ -40,6 +40,9 @@ export interface AuthResponse {
   accessToken: string;
   refreshToken?: string;
   userId: string;
+  username?: string;
+  email?: string;
+  requiresEmailVerification?: boolean;
   message?: string;
 }
 
@@ -279,9 +282,19 @@ export interface AdminUserDetail {
 }
 
 export type AdminContentType = "POST" | "COMMENT" | "STORY" | "VIDEO";
+export type AdminCommunityType = "GROUP" | "PAGE";
 
 export interface AdminBroadcastResult {
   sent: number;
+}
+
+export interface AdminPlatformSettings {
+  id: string;
+  registrationEnabled: boolean;
+  maintenanceMode: boolean;
+  defaultProfileVisibility: "PUBLIC" | "PRIVATE";
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // Token management
@@ -553,6 +566,14 @@ export const authApi = {
   register: async (data: RegisterRequest) => {
     const response = await api.post<ApiResponse<AuthResponse>>('/api/auth/register', data);
     return response.data!;
+  },
+  verifyEmail: async (email: string, code: string) => {
+    const response = await api.post<ApiResponse<AuthResponse>>('/api/auth/verify-email', { email, code });
+    return response.data!;
+  },
+  resendVerification: async (email: string) => {
+    const response = await api.post<ApiResponse<null>>('/api/auth/resend-verification', { email });
+    return response.message || "Code envoyé";
   },
   
   logout: () => {
@@ -1090,6 +1111,27 @@ export const adminApi = {
   broadcastNotification: async (data: { title: string; body: string; target?: "ALL" | "ACTIVE" }) => {
     const response = await api.post<ApiResponse<AdminBroadcastResult> | AdminBroadcastResult>('/api/admin/notifications/broadcast', data);
     return unwrapApiData<AdminBroadcastResult>(response, { sent: 0 });
+  },
+  getCommunities: async (page = 0, size = 20, type: AdminCommunityType = "GROUP", query = "") => {
+    const response = await api.get<PageResponse<SocialGroup | SocialPage>>(
+      `/api/admin/communities?page=${page}&size=${size}&type=${encodeURIComponent(type)}&q=${encodeURIComponent(query)}&_=${Date.now()}`
+    );
+    return response;
+  },
+  deleteCommunity: (type: AdminCommunityType, communityId: string) =>
+    api.delete<ApiResponse<{ id: string; type: AdminCommunityType }> | { id: string; type: AdminCommunityType }>(`/api/admin/communities/${type}/${communityId}`),
+  getSettings: async () => {
+    const response = await api.get<ApiResponse<AdminPlatformSettings> | AdminPlatformSettings>(`/api/admin/settings?_=${Date.now()}`);
+    return unwrapApiData<AdminPlatformSettings>(response, {
+      id: "main",
+      registrationEnabled: true,
+      maintenanceMode: false,
+      defaultProfileVisibility: "PUBLIC",
+    });
+  },
+  updateSettings: async (settings: Partial<AdminPlatformSettings>) => {
+    const response = await api.put<ApiResponse<AdminPlatformSettings> | AdminPlatformSettings>('/api/admin/settings', settings);
+    return unwrapApiData<AdminPlatformSettings>(response, settings as AdminPlatformSettings);
   },
   getAudit: async (page = 0, size = 30) => {
     const response = await api.get<PageResponse<AdminAuditLog>>(`/api/admin/audit?page=${page}&size=${size}&_=${Date.now()}`);

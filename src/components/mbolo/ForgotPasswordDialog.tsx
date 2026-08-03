@@ -48,8 +48,8 @@ export const ForgotPasswordDialog = ({ open, onOpenChange }: ForgotPasswordDialo
       return;
     }
 
-    if (!newPassword || newPassword.length < 6) {
-      toast.error("Le mot de passe doit contenir au moins 6 caractères");
+    if (!newPassword || newPassword.length < 8) {
+      toast.error("Le mot de passe doit contenir au moins 8 caractères");
       return;
     }
 
