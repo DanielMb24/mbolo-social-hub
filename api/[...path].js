@@ -61,9 +61,32 @@ export default async function handler(req, res) {
 
     return json(res, 404, error("Endpoint introuvable"));
   } catch (err) {
+    console.error("API handler error:", err);
     const status = err.status || (err.message === "MONGODB_URI is missing" ? 503 : 500);
-    return json(res, status, error(err.message || "Erreur serveur"));
+    return json(res, status, error(publicErrorMessage(err, status)));
   }
+}
+
+function publicErrorMessage(err, status) {
+  const message = String(err?.message || "");
+
+  if (message === "MONGODB_URI is missing") {
+    return "La base de données n'est pas configurée. Contactez l'administrateur.";
+  }
+  if (message.includes("JWT_SECRET")) {
+    return "La connexion est temporairement indisponible. Contactez l'administrateur.";
+  }
+  if (message.includes("SMTP non configuré")) {
+    return "L'envoi d'email n'est pas encore configuré. Contactez l'administrateur.";
+  }
+  if (message.includes("SMTP timeout") || message.includes("SMTP error")) {
+    return "L'envoi d'email est temporairement indisponible. Réessayez dans quelques instants.";
+  }
+  if (status >= 500) {
+    return "Le serveur rencontre un problème. Réessayez dans quelques instants.";
+  }
+
+  return message || "Une erreur est survenue. Réessayez dans quelques instants.";
 }
 
 async function authRoutes(req, res, parts) {
