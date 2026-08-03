@@ -22,6 +22,7 @@ interface Post {
   };
   content: string;
   mediaUrls?: string[];
+  visibility?: "PUBLIC" | "PRIVATE";
   likes: string[];
   commentsCount: number;
   createdAt: string;
@@ -48,6 +49,7 @@ const FeedPage = () => {
   const [showPostComposer, setShowPostComposer] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [postVisibility, setPostVisibility] = useState<"PUBLIC" | "PRIVATE">("PUBLIC");
   const imageUploadRef = useRef<HTMLInputElement>(null);
   const reactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const authorCacheRef = useRef<Map<string, Post["author"]>>(new Map());
@@ -59,15 +61,34 @@ const FeedPage = () => {
   const likeRateLimit = useRateLimit({ maxCalls: 100, windowMs: 60000, message: "Vous aimez trop vite !" });
   const commentRateLimit = useRateLimit({ maxCalls: 20, windowMs: 60000, message: "Max 20 commentaires par minute." });
 
-  useEffect(() => { 
-    loadPosts();
-    loadUserProfile();
+  useEffect(() => {
+    const requestState = { active: true };
+
+    loadPosts(requestState);
+    loadSavedPosts(requestState);
+    loadUserProfile(requestState);
+
+    return () => {
+      requestState.active = false;
+      if (reactionTimeoutRef.current) {
+        clearTimeout(reactionTimeoutRef.current);
+      }
+    };
   }, []);
 
-  const loadUserProfile = async () => {
+  const loadSavedPosts = async (requestState = { active: true }) => {
+    try {
+      const saved = await postApi.getSavedPosts();
+      if (requestState.active) setSavedPosts(new Set(saved.map((post) => post.id)));
+    } catch {
+      if (requestState.active) setSavedPosts(new Set());
+    }
+  };
+
+  const loadUserProfile = async (requestState = { active: true }) => {
     try {
       const profile = await userApi.getProfile(userId);
-      if (profile.username) {
+      if (requestState.active && profile.username) {
         setUsername(profile.username);
         localStorage.setItem('username', profile.username);
       }
@@ -76,13 +97,17 @@ const FeedPage = () => {
     }
   };
 
-  const loadPosts = async () => {
+  const loadPosts = async (requestState = { active: true }) => {
     try {
       setLoading(true);
       const data = await postApi.getFeed();
+      if (!requestState.active) return;
       const basePosts = data.map((post: any) => ({
         ...post,
+        id: String(post.id),
         likes: Array.isArray(post.likes) ? post.likes : [],
+        commentsCount: Number(post.commentsCount || 0),
+        mediaUrls: Array.isArray(post.mediaUrls) ? post.mediaUrls : [],
         author: authorCacheRef.current.get(post.authorId) || {
           id: post.authorId,
           username: getDisplayUsername(undefined, post.authorId),
@@ -111,14 +136,16 @@ const FeedPage = () => {
           })
         );
 
+        if (!requestState.active) return;
         setPosts(prev => prev.map(post => ({
           ...post,
           author: authorCacheRef.current.get(post.authorId) || post.author
         })));
       }
     } catch {
-      setPosts([]);
-      setLoading(false);
+      if (requestState.active) setPosts([]);
+    } finally {
+      if (requestState.active) setLoading(false);
     }
   };
 
@@ -131,11 +158,12 @@ const FeedPage = () => {
     if (!postRateLimit.check()) return;
     setPosting(true);
     try {
-      await postApi.createPost({ content: newPost }, selectedImageFile ? [selectedImageFile] : undefined);
+      await postApi.createPost({ content: newPost, visibility: postVisibility }, selectedImageFile ? [selectedImageFile] : undefined);
       
       setNewPost("");
       setPreviewImage(null);
       setSelectedImageFile(null);
+      setPostVisibility("PUBLIC");
       setShowPostComposer(false);
       
       toast.success("Post publié avec succès");
@@ -149,7 +177,7 @@ const FeedPage = () => {
     } finally {
       setPosting(false);
     }
-  }, [newPost, posting, postRateLimit, selectedImageFile]);
+  }, [newPost, posting, postRateLimit, selectedImageFile, postVisibility]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -174,7 +202,7 @@ const FeedPage = () => {
       const isLiked = post.likes.includes(userId);
       
       // Optimistic update
-      setPosts(posts.map(p => p.id === id ? { 
+      setPosts(prev => prev.map(p => p.id === id ? { 
         ...p, 
         likes: isLiked ? p.likes.filter(uid => uid !== userId) : [...p.likes, userId] 
       } : p));
@@ -233,7 +261,7 @@ const FeedPage = () => {
       await postApi.addComment(postId, commentText);
       setCommentText("");
       loadComments(postId);
-      setPosts(posts.map(p => p.id === postId ? { ...p, commentsCount: p.commentsCount + 1 } : p));
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, commentsCount: p.commentsCount + 1 } : p));
     } catch {
       toast.error("Erreur lors de l'ajout du commentaire");
     }
@@ -254,9 +282,39 @@ const FeedPage = () => {
     }
   }, []);
 
+  const toggleSavePost = useCallback(async (postId: string) => {
+    const wasSaved = savedPosts.has(postId);
+    setSavedPosts(prev => {
+      const next = new Set(prev);
+      if (wasSaved) next.delete(postId);
+      else next.add(postId);
+      return next;
+    });
+
+    try {
+      if (wasSaved) {
+        await postApi.unsavePost(postId);
+        toast.success("Retiré des enregistrés");
+      } else {
+        await postApi.savePost(postId);
+        toast.success("Publication enregistrée");
+      }
+    } catch (error) {
+      setSavedPosts(prev => {
+        const next = new Set(prev);
+        if (wasSaved) next.add(postId);
+        else next.delete(postId);
+        return next;
+      });
+      toast.error("Action impossible", {
+        description: getErrorMessage(error, "Réessayez dans quelques instants."),
+      });
+    }
+  }, [savedPosts]);
+
   return (
-    <div className="flex justify-center">
-      <div className="w-full max-w-[680px]">
+    <div className="flex justify-center min-w-0">
+      <div className="w-full max-w-[680px] min-w-0">
         {/* Stories */}
         <StoriesBar
           currentUserId={userId || "me"}
@@ -284,7 +342,7 @@ const FeedPage = () => {
             </div>
             <button
               onClick={() => setShowPostComposer(true)}
-              className="flex-1 text-left px-4 py-2.5 rounded-full bg-muted text-muted-foreground hover:bg-muted/80 transition-colors text-sm"
+              className="flex-1 min-w-0 text-left px-4 py-2.5 rounded-full bg-muted text-muted-foreground hover:bg-muted/80 transition-colors text-sm truncate"
             >
               Quoi de neuf, {username} ?
             </button>
@@ -307,12 +365,12 @@ const FeedPage = () => {
         {/* Post Composer Modal */}
         {showPostComposer && (
           <div className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-50 p-4">
-            <div className="bg-card rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="bg-card rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col min-w-0">
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b">
                 <h3 className="text-lg font-bold text-foreground">Créer une publication</h3>
                 <button
-                  onClick={() => { setShowPostComposer(false); setNewPost(""); setPreviewImage(null); setSelectedImageFile(null); }}
+                  onClick={() => { setShowPostComposer(false); setNewPost(""); setPreviewImage(null); setSelectedImageFile(null); setPostVisibility("PUBLIC"); }}
                   className="w-9 h-9 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -328,7 +386,7 @@ const FeedPage = () => {
                   <p className="font-semibold text-sm">{username}</p>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
                     <Globe className="w-3 h-3" />
-                    <span>Public</span>
+                    <span>{postVisibility === "PRIVATE" ? "Privé" : "Public"}</span>
                   </div>
                 </div>
               </div>
@@ -363,7 +421,7 @@ const FeedPage = () => {
 
               {/* Add to post */}
               <div className="px-4 py-3 border-t">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-medium">Ajouter à votre post</span>
                   <div className="flex items-center gap-1">
                     <input
@@ -393,6 +451,14 @@ const FeedPage = () => {
                     </button>
                   </div>
                 </div>
+                <select
+                  value={postVisibility}
+                  onChange={(event) => setPostVisibility(event.target.value as "PUBLIC" | "PRIVATE")}
+                  className="mt-3 w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="PUBLIC">Public</option>
+                  <option value="PRIVATE">Privé</option>
+                </select>
               </div>
 
               {/* Footer */}
@@ -461,7 +527,7 @@ const FeedPage = () => {
             return (
               <article key={post.id} className="bg-card rounded-xl border shadow-sm overflow-hidden">
                 {/* Post Header */}
-                <div className="flex items-center gap-3 p-3 pb-2">
+                <div className="flex items-center gap-3 p-3 pb-2 min-w-0">
                   <div className="w-10 h-10 rounded-full bg-secondary/20 flex items-center justify-center text-secondary font-bold text-sm shrink-0">
                     {authorInitials}
                   </div>
@@ -470,10 +536,10 @@ const FeedPage = () => {
                       <span className="font-bold text-sm text-foreground">{authorName}</span>
                     </div>
                     <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      {formatTimeAgo(post.createdAt)} · <Globe className="w-3 h-3" />
+                      {formatTimeAgo(post.createdAt)} · <Globe className="w-3 h-3" /> {post.visibility === "PRIVATE" ? "Privé" : "Public"}
                     </span>
                   </div>
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <button
                       onClick={(e) => { e.stopPropagation(); setShowMenu(showMenu === post.id ? null : post.id); }}
                       className="p-2 rounded-full text-muted-foreground hover:bg-muted transition-colors"
@@ -485,16 +551,8 @@ const FeedPage = () => {
                         <button 
                           onClick={(e) => { 
                             e.stopPropagation(); 
-                            setSavedPosts(prev => { 
-                              const s = new Set(prev); 
-                              if (s.has(post.id)) {
-                                s.delete(post.id);
-                              } else {
-                                s.add(post.id);
-                              }
-                              return s; 
-                            }); 
-                            setShowMenu(null); 
+                            setShowMenu(null);
+                            toggleSavePost(post.id);
                           }}
                           className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
                         >
@@ -528,8 +586,8 @@ const FeedPage = () => {
                 </div>
 
                 {/* Post Content */}
-<div className="px-3 pb-2 cursor-pointer" onClick={() => navigate(`/post/${post.id}`)}>
-                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+                <div className="px-3 pb-2 cursor-pointer min-w-0" onClick={() => navigate(`/post/${post.id}`)}>
+                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">{post.content}</p>
                   
                   {/* Post Images */}
                   {post.mediaUrls && post.mediaUrls.length > 0 && (
@@ -538,7 +596,8 @@ const FeedPage = () => {
                         <img 
                           src={post.mediaUrls[0]} 
                           alt="Post" 
-                          className="w-full max-h-[500px] object-cover"
+                          className="w-full max-h-[500px] object-cover bg-muted"
+                          loading="lazy"
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
                           }}
@@ -550,7 +609,8 @@ const FeedPage = () => {
                               key={idx}
                               src={url} 
                               alt={`Post ${idx + 1}`} 
-                              className="w-full h-48 object-cover"
+                              className="w-full h-48 object-cover bg-muted"
+                              loading="lazy"
                               onError={(e) => {
                                 e.currentTarget.style.display = 'none';
                               }}
@@ -597,7 +657,7 @@ const FeedPage = () => {
 
                 {/* Action buttons - Facebook style */}
                 <div className="border-t mx-3" />
-                <div className="flex items-center px-1 py-0.5 relative">
+                <div className="flex items-center px-1 py-0.5 relative min-w-0">
                   {/* Reaction Picker */}
                   {showReactionPicker === post.id && (
                     <div className="absolute bottom-full left-2 mb-1 bg-card border rounded-full shadow-xl px-2 py-1.5 flex items-center gap-0.5 z-30 animate-fade-in">
@@ -624,26 +684,26 @@ const FeedPage = () => {
                     onMouseLeave={() => { handleLongPressEnd(); setShowReactionPicker(null); }}
                     onTouchStart={() => handleLongPressStart(post.id)}
                     onTouchEnd={handleLongPressEnd}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                    className={`flex-1 min-w-0 flex items-center justify-center gap-1 sm:gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
                       isLiked ? "text-primary" : "text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     <ThumbsUp className={`w-5 h-5 ${isLiked ? "fill-current" : ""}`} />
-                    J'aime
+                    <span className="truncate">J'aime</span>
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowComments(showComments === post.id ? null : post.id); if (showComments !== post.id) loadComments(post.id); }}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors"
+                    className="flex-1 min-w-0 flex items-center justify-center gap-1 sm:gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors"
                   >
                     <MessageCircle className="w-5 h-5" />
-                    Commenter
+                    <span className="truncate">Commenter</span>
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleShare(post.id); }}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors"
+                    className="flex-1 min-w-0 flex items-center justify-center gap-1 sm:gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors"
                   >
                     <Share2 className="w-5 h-5" />
-                    Partager
+                    <span className="truncate">Partager</span>
                   </button>
                 </div>
 
@@ -654,7 +714,7 @@ const FeedPage = () => {
                       <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-bold shrink-0">
                         {userInitials}
                       </div>
-                      <div className="flex-1 flex gap-2">
+                      <div className="flex-1 min-w-0 flex gap-2">
                         <input
                           type="text"
                           value={commentText}
@@ -676,7 +736,7 @@ const FeedPage = () => {
                           <div>
                             <div className="bg-muted rounded-2xl px-3 py-2">
                               <p className="text-xs font-bold">{getDisplayUsername(c.author?.username, c.authorId)}</p>
-                              <p className="text-sm">{c.content}</p>
+                              <p className="text-sm break-words">{c.content}</p>
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 ml-3">
                               <button className="text-[11px] font-semibold text-muted-foreground hover:text-foreground">J'aime</button>

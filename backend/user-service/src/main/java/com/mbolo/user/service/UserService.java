@@ -8,10 +8,15 @@ import com.mbolo.user.repository.UserProfileRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.CONFLICT;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 @RequiredArgsConstructor
@@ -38,17 +43,25 @@ public class UserService {
             newProfile.setId(userId);
             return newProfile;
         });
-        
-        if (request.getUsername() != null) profile.setUsername(request.getUsername());
-        if (request.getEmail() != null) profile.setEmail(request.getEmail());
-        if (request.getFullname() != null) profile.setFullname(request.getFullname());
-        if (request.getBio() != null) profile.setBio(request.getBio());
-        if (request.getLocation() != null) profile.setLocation(request.getLocation());
+
+        if (request.getUsername() != null) {
+            String username = cleanUsername(request.getUsername());
+            repository.findByUsername(username)
+                    .filter(existing -> !existing.getId().equals(userId))
+                    .ifPresent(existing -> {
+                        throw new ResponseStatusException(CONFLICT, "Nom d'utilisateur déjà utilisé");
+                    });
+            profile.setUsername(username);
+        }
+        if (request.getFullname() != null) profile.setFullname(cleanText(request.getFullname(), "Nom complet", 1, 80));
+        if (request.getBio() != null) profile.setBio(cleanText(request.getBio(), "Bio", 0, 300));
+        if (request.getLocation() != null) profile.setLocation(cleanText(request.getLocation(), "Localisation", 0, 80));
         return repository.save(profile);
     }
 
     public List<UserProfile> searchUsers(String query) {
-        return repository.findByFullnameContainingIgnoreCase(query);
+        String safeQuery = cleanText(query == null ? "" : query, "Recherche", 0, 50);
+        return repository.findByFullnameContainingIgnoreCase(safeQuery);
     }
 
     public void blockUser(String userId, String blockedId) {
@@ -62,7 +75,11 @@ public class UserService {
     @Transactional
     public void followUser(String followerId, String followingId) {
         if (followerId.equals(followingId)) {
-            throw new IllegalArgumentException("Cannot follow yourself");
+            throw new ResponseStatusException(BAD_REQUEST, "Vous ne pouvez pas vous suivre vous-même");
+        }
+
+        if (!repository.existsById(followingId)) {
+            throw new ResponseStatusException(NOT_FOUND, "Utilisateur introuvable");
         }
 
         // Check if already following
@@ -118,5 +135,21 @@ public class UserService {
             profile.setFollowersCount((int) followRepository.countByFollowingId(followingId));
             repository.save(profile);
         });
+    }
+
+    private String cleanText(String value, String field, int min, int max) {
+        String text = value == null ? "" : value.trim();
+        if (text.length() < min || text.length() > max) {
+            throw new ResponseStatusException(BAD_REQUEST, field + " invalide");
+        }
+        return text;
+    }
+
+    private String cleanUsername(String value) {
+        String username = cleanText(value, "Nom d'utilisateur", 3, 30);
+        if (!username.matches("^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$")) {
+            throw new ResponseStatusException(BAD_REQUEST, "Nom d'utilisateur invalide");
+        }
+        return username;
     }
 }

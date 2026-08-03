@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { X, Image, Type, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Image, Type, Check, ChevronLeft, ChevronRight, Globe, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { storyApi } from "@/lib/api";
 import type { Story } from "./StoriesBar";
@@ -42,6 +42,7 @@ const StoryCreator = ({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [gradientPage, setGradientPage] = useState(0);
+  const [visibility, setVisibility] = useState<"PUBLIC" | "PRIVATE">("PUBLIC");
   const [publishing, setPublishing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const PRESETS_PER_PAGE = 6;
@@ -84,6 +85,7 @@ const StoryCreator = ({
         mediaType: mode,
         content: mode === "text" ? textContent.trim() : undefined,
         backgroundColor: mode === "text" ? selectedGradient : undefined,
+        visibility,
       }, mode === "image" ? imageFile || undefined : undefined);
 
       onStoryCreated({
@@ -174,6 +176,36 @@ const StoryCreator = ({
 
         {/* Controls */}
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Audience</label>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setVisibility("PUBLIC")}
+                className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
+                  visibility === "PUBLIC"
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Globe className="w-4 h-4" />
+                Public
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibility("PRIVATE")}
+                className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
+                  visibility === "PRIVATE"
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Lock className="w-4 h-4" />
+                Privé
+              </button>
+            </div>
+          </div>
+
           {mode === "text" && (
             <>
               <textarea

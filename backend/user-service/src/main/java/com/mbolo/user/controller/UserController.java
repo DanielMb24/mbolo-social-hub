@@ -1,12 +1,15 @@
 package com.mbolo.user.controller;
 
 import com.mbolo.user.dto.ApiResponse;
+import com.mbolo.user.dto.PublicUserProfile;
 import com.mbolo.user.dto.UpdateProfileRequest;
 import com.mbolo.user.model.UserProfile;
 import com.mbolo.user.service.UserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -25,9 +28,9 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<UserProfile>> getProfile(@PathVariable String id) {
+    public ResponseEntity<ApiResponse<PublicUserProfile>> getProfile(@PathVariable String id) {
         return userService.getProfile(id)
-                .map(p -> ResponseEntity.ok(ApiResponse.ok(p)))
+                .map(p -> ResponseEntity.ok(ApiResponse.ok(PublicUserProfile.from(p))))
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -41,13 +44,19 @@ public class UserController {
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<UserProfile>> updateProfileById(
             @PathVariable String id,
+            @RequestHeader("X-User-Id") String currentUserId,
             @RequestBody UpdateProfileRequest request) {
+        if (!currentUserId.equals(id)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Action interdite");
+        }
         return ResponseEntity.ok(ApiResponse.ok(userService.updateProfile(id, request)));
     }
 
     @GetMapping("/search")
-    public ResponseEntity<ApiResponse<List<UserProfile>>> search(@RequestParam String q) {
-        return ResponseEntity.ok(ApiResponse.ok(userService.searchUsers(q)));
+    public ResponseEntity<ApiResponse<List<PublicUserProfile>>> search(@RequestParam String q) {
+        return ResponseEntity.ok(ApiResponse.ok(userService.searchUsers(q).stream()
+                .map(PublicUserProfile::from)
+                .toList()));
     }
 
     @PostMapping("/block/{blockedId}")
@@ -75,13 +84,17 @@ public class UserController {
     }
 
     @GetMapping("/{userId}/followers")
-    public ResponseEntity<ApiResponse<List<UserProfile>>> getFollowers(@PathVariable String userId) {
-        return ResponseEntity.ok(ApiResponse.ok(userService.getFollowers(userId)));
+    public ResponseEntity<ApiResponse<List<PublicUserProfile>>> getFollowers(@PathVariable String userId) {
+        return ResponseEntity.ok(ApiResponse.ok(userService.getFollowers(userId).stream()
+                .map(PublicUserProfile::from)
+                .toList()));
     }
 
     @GetMapping("/{userId}/following")
-    public ResponseEntity<ApiResponse<List<UserProfile>>> getFollowing(@PathVariable String userId) {
-        return ResponseEntity.ok(ApiResponse.ok(userService.getFollowing(userId)));
+    public ResponseEntity<ApiResponse<List<PublicUserProfile>>> getFollowing(@PathVariable String userId) {
+        return ResponseEntity.ok(ApiResponse.ok(userService.getFollowing(userId).stream()
+                .map(PublicUserProfile::from)
+                .toList()));
     }
 
     @GetMapping("/{userId}/is-following")

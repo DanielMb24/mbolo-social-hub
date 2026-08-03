@@ -22,6 +22,7 @@ const CATEGORIES = [
   { id: 'popular', label: 'Populaires', icon: TrendingUp },
   { id: 'creators', label: 'Créateurs', icon: Sparkles },
 ];
+const MAX_INITIAL_FOLLOW_CHECKS = 20;
 
 const PeoplePage = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -55,7 +56,7 @@ const PeoplePage = () => {
 
       if (filteredUsers.length > 0) {
         const followingStatuses = await Promise.all(
-          filteredUsers.map(async (user) => {
+          filteredUsers.slice(0, MAX_INITIAL_FOLLOW_CHECKS).map(async (user) => {
             try {
               const isFollowing = await userApi.isFollowing(user.id);
               return { userId: user.id, isFollowing };

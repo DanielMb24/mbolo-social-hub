@@ -16,6 +16,7 @@ export interface Story {
   expiresAt: string;
   seen: boolean;
   duration?: number; // ms
+  visibility?: "PUBLIC" | "PRIVATE";
 }
 
 interface StoryGroup {

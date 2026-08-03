@@ -16,16 +16,18 @@ const VideoPage = lazy(() => import("@/components/mbolo/VideoPage"));
 const ProfilePage = lazy(() => import("@/components/mbolo/ProfilePage"));
 const PeoplePage = lazy(() => import("@/components/mbolo/PeoplePage"));
 const ExplorePage = lazy(() => import("@/components/mbolo/ExplorePage"));
+const SocialHubPage = lazy(() => import("@/components/mbolo/SocialHubPage"));
 const StoryManager = lazy(() => import("@/components/mbolo/StoryManager"));
 const TrendingSidebar = lazy(() => import("@/components/mbolo/TrendingSidebar"));
 const NotificationPanel = lazy(() => import("@/components/mbolo/NotificationPanel"));
 const GlobalSearch = lazy(() => import("@/components/mbolo/GlobalSearch"));
 
-type Tab = "feed" | "chat" | "videos" | "people" | "profile" | "explore" | "stories";
+type Tab = "feed" | "chat" | "videos" | "people" | "profile" | "explore" | "stories" | "communities";
 
 const NAV_ITEMS: { id: Tab; icon: React.ElementType; label: string }[] = [
   { id: "feed", icon: Home, label: "Accueil" },
   { id: "explore", icon: Compass, label: "Explorer" },
+  { id: "communities", icon: Users, label: "Communautés" },
   { id: "stories", icon: Sparkles, label: "Stories" },
   { id: "chat", icon: MessageCircle, label: "Messenger" },
   { id: "videos", icon: Video, label: "Vidéos" },
@@ -135,7 +137,7 @@ const Index = () => {
   };
 
   // Header nav items for Facebook-style top bar
-  const headerNavItems = NAV_ITEMS.filter(n => ['feed', 'explore', 'stories', 'videos', 'people', 'chat'].includes(n.id));
+  const headerNavItems = NAV_ITEMS.filter(n => ['feed', 'explore', 'communities', 'stories', 'videos', 'people', 'chat'].includes(n.id));
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -257,7 +259,7 @@ const Index = () => {
       {/* ─── Main Content ─── */}
       <div className="flex flex-1 overflow-hidden">
         {/* Desktop Left Sidebar */}
-        {!isMobile && (activeTab === 'feed' || activeTab === 'explore') && (
+        {!isMobile && (activeTab === 'feed' || activeTab === 'explore' || activeTab === 'communities') && (
           <aside className="w-[240px] border-r overflow-y-auto p-2 hidden xl:block shrink-0">
             <div className="space-y-0.5">
               <button onClick={() => handleTabChange('profile')} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-muted text-left">
@@ -270,6 +272,7 @@ const Index = () => {
                 { icon: Users, label: 'Amis', tab: 'people' as Tab },
                 { icon: Video, label: 'Vidéos', tab: 'videos' as Tab },
                 { icon: Compass, label: 'Explorer', tab: 'explore' as Tab },
+                { icon: Users, label: 'Communautés', tab: 'communities' as Tab },
                 { icon: MessageCircle, label: 'Messenger', tab: 'chat' as Tab },
               ].map(item => (
                 <button
@@ -290,6 +293,7 @@ const Index = () => {
           <Suspense fallback={<LoadingPanel />}>
             {activeTab === "feed" && <FeedPage />}
             {activeTab === "explore" && <ExplorePage />}
+            {activeTab === "communities" && <SocialHubPage />}
             {activeTab === "stories" && (
               <StoryManager
                 currentUserId={currentUserId}
@@ -305,7 +309,7 @@ const Index = () => {
         </main>
 
         {/* Right Sidebar */}
-        {!isMobile && (activeTab === 'feed' || activeTab === 'explore') && (
+        {!isMobile && (activeTab === 'feed' || activeTab === 'explore' || activeTab === 'communities') && (
           <div className="w-[280px] border-l overflow-y-auto p-3 hidden lg:block shrink-0">
             <Suspense fallback={null}>
               <TrendingSidebar />

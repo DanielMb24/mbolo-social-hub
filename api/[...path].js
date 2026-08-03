@@ -48,6 +48,9 @@ export default async function handler(req, res) {
     if (parts[0] === "stories") return storyRoutes(req, res, parts.slice(1));
     if (parts[0] === "notifications") return notificationRoutes(req, res, parts.slice(1));
     if (parts[0] === "videos") return videoRoutes(req, res, parts.slice(1));
+    if (parts[0] === "groups") return groupRoutes(req, res, parts.slice(1));
+    if (parts[0] === "pages") return pageRoutes(req, res, parts.slice(1));
+    if (parts[0] === "recommendations") return recommendationRoutes(req, res);
     if (parts[0] === "chat") return chatRoutes(req, res, parts.slice(1));
     if (parts[0] === "moderation") return moderationRoutes(req, res, parts.slice(1));
     if (parts[0] === "search") return searchRoutes(req, res);
@@ -95,6 +98,7 @@ async function authRoutes(req, res, parts) {
       fullname: body.fullName || body.fullname || "",
       bio: "",
       blockedUsers: [],
+      profileVisibility: "PUBLIC",
       followersCount: 0,
       followingCount: 0,
       createdAt: now,
@@ -179,25 +183,52 @@ async function userRoutes(req, res, parts) {
   const database = await serviceDb("user");
   const users = database.collection(COLLECTIONS.userProfiles);
   const follows = database.collection(COLLECTIONS.userFollows);
+  const followRequests = database.collection(COLLECTIONS.userFollowRequests);
   const userId = currentUserId(req);
 
+  if (req.method === "GET" && parts[0] === "me" && parts[1] === "blocked") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const viewer = await users.findOne({ _id: makeId(userId) });
+    const blockedIds = viewer?.blockedUsers || [];
+    const rows = blockedIds.length
+      ? await users.find({ _id: { $in: blockedIds.map(makeId) } }).toArray()
+      : [];
+    return json(res, 200, ok(rows.map(publicUser)));
+  }
+
+  if (req.method === "GET" && parts[0] === "me" && parts[1] === "follow-requests") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const rows = await followRequests.find({ targetId: userId, status: "PENDING" }).sort({ createdAt: -1 }).limit(100).toArray();
+    const requesterIds = rows.map((row) => makeId(row.requesterId));
+    const profiles = requesterIds.length ? await users.find({ _id: { $in: requesterIds } }).toArray() : [];
+    const byId = new Map(profiles.map((profile) => [String(profile._id), publicUser(profile)]));
+    return json(res, 200, ok(rows.map(row => ({ ...normalizeDoc(row), requester: byId.get(row.requesterId) || null }))));
+  }
+
   if (req.method === "GET" && parts[0] === "search") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const viewer = await users.findOne({ _id: makeId(userId) });
+    const viewerBlocked = new Set(viewer?.blockedUsers || []);
     const q = validateSearch(new URL(req.url, "http://localhost").searchParams.get("q"));
     const escaped = escapeRegex(q);
     const filter = escaped ? { username: { $regex: escaped, $options: "i" } } : {};
     const rows = await users.find(filter).limit(50).toArray();
-    return json(res, 200, ok(rows.map(publicUser)));
+    return json(res, 200, ok(rows
+      .filter(row => canViewProfile(row, userId, viewerBlocked))
+      .map(publicUser)));
   }
 
   if (req.method === "GET" && parts[1] === "followers") {
-    const rows = await follows.find({ followingId: parts[0] }).toArray();
+    const profileId = validateId(parts[0], "Utilisateur");
+    const rows = await follows.find({ followingId: profileId }).toArray();
     const ids = rows.map((r) => makeId(r.followerId));
     const profiles = ids.length ? await users.find({ _id: { $in: ids } }).toArray() : [];
     return json(res, 200, ok(profiles.map(publicUser)));
   }
 
   if (req.method === "GET" && parts[1] === "following") {
-    const rows = await follows.find({ followerId: parts[0] }).toArray();
+    const profileId = validateId(parts[0], "Utilisateur");
+    const rows = await follows.find({ followerId: profileId }).toArray();
     const ids = rows.map((r) => makeId(r.followingId));
     const profiles = ids.length ? await users.find({ _id: { $in: ids } }).toArray() : [];
     return json(res, 200, ok(profiles.map(publicUser)));
@@ -205,15 +236,47 @@ async function userRoutes(req, res, parts) {
 
   if (req.method === "GET" && parts[1] === "is-following") {
     if (!userId) return json(res, 200, ok(false));
-    const found = await follows.findOne({ followerId: userId, followingId: parts[0] });
+    const targetId = validateId(parts[0], "Utilisateur");
+    const found = await follows.findOne({ followerId: userId, followingId: targetId });
     return json(res, 200, ok(Boolean(found)));
+  }
+
+  if (req.method === "GET" && parts[1] === "follow-status") {
+    if (!userId) return json(res, 200, ok({ status: "NONE" }));
+    const targetId = validateId(parts[0], "Utilisateur");
+    const found = await follows.findOne({ followerId: userId, followingId: targetId });
+    if (found) return json(res, 200, ok({ status: "FOLLOWING" }));
+    const pending = await followRequests.findOne({ requesterId: userId, targetId, status: "PENDING" });
+    return json(res, 200, ok({ status: pending ? "PENDING" : "NONE" }));
   }
 
   if ((req.method === "POST" || req.method === "DELETE") && parts[1] === "follow") {
     if (!userId) return json(res, 401, error("Non authentifié"));
-    const targetId = parts[0];
+    const targetId = validateId(parts[0], "Utilisateur");
+    if (targetId === userId) return json(res, 400, error("Vous ne pouvez pas vous suivre vous-même"));
+    const target = await users.findOne({ _id: makeId(targetId) });
+    if (!target) return json(res, 404, error("Utilisateur introuvable"));
     if (req.method === "POST") {
+      const isPrivate = String(target.profileVisibility || "PUBLIC").toUpperCase() === "PRIVATE";
+      if (isPrivate) {
+        const alreadyFollowing = await follows.findOne({ followerId: userId, followingId: targetId });
+        if (!alreadyFollowing) {
+          await followRequests.updateOne(
+            { requesterId: userId, targetId },
+            { $setOnInsert: { requesterId: userId, targetId, status: "PENDING", createdAt: new Date().toISOString() } },
+            { upsert: true }
+          );
+          await createNotification(database, targetId, {
+            type: "follow_request",
+            title: "Demande d'abonnement",
+            body: "Quelqu'un souhaite vous suivre",
+            actorId: userId,
+          });
+        }
+        return json(res, 200, ok({ status: alreadyFollowing ? "FOLLOWING" : "PENDING" }, "Demande envoyée"));
+      }
       await follows.updateOne({ followerId: userId, followingId: targetId }, { $setOnInsert: { createdAt: new Date().toISOString() } }, { upsert: true });
+      await followRequests.deleteOne({ requesterId: userId, targetId });
       await createNotification(database, targetId, {
         type: "follow",
         title: "Nouvel abonné",
@@ -222,44 +285,120 @@ async function userRoutes(req, res, parts) {
       });
     } else {
       await follows.deleteOne({ followerId: userId, followingId: targetId });
+      await followRequests.deleteOne({ requesterId: userId, targetId });
     }
     await syncFollowCounts(database, userId, targetId);
-    return json(res, 200, ok("OK"));
+    return json(res, 200, ok({ status: req.method === "POST" ? "FOLLOWING" : "NONE" }));
+  }
+
+  if ((req.method === "POST" || req.method === "DELETE") && parts[1] === "follow-requests" && parts[2]) {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const requesterId = validateId(parts[2], "Utilisateur");
+    const request = await followRequests.findOne({ requesterId, targetId: userId, status: "PENDING" });
+    if (!request) return json(res, 404, error("Demande introuvable"));
+    if (req.method === "POST") {
+      await follows.updateOne(
+        { followerId: requesterId, followingId: userId },
+        { $setOnInsert: { createdAt: new Date().toISOString() } },
+        { upsert: true }
+      );
+      await followRequests.updateOne({ _id: request._id }, { $set: { status: "APPROVED", updatedAt: new Date().toISOString() } });
+      await syncFollowCounts(database, requesterId, userId);
+      await createNotification(database, requesterId, {
+        type: "follow",
+        title: "Demande acceptée",
+        body: "Votre demande d'abonnement a été acceptée",
+        actorId: userId,
+      });
+      return json(res, 200, ok({ status: "FOLLOWING" }, "Demande acceptée"));
+    }
+    await followRequests.updateOne({ _id: request._id }, { $set: { status: "REJECTED", updatedAt: new Date().toISOString() } });
+    return json(res, 200, ok({ status: "NONE" }, "Demande refusée"));
   }
 
   if (req.method === "GET" && parts[0]) {
-    const user = await users.findOne({ _id: makeId(parts[0]) });
-    return user ? json(res, 200, ok(publicUser(user))) : json(res, 404, error("Utilisateur introuvable"));
+    const profileId = validateId(parts[0], "Utilisateur");
+    const user = await users.findOne({ _id: makeId(profileId) });
+    if (!user) return json(res, 404, error("Utilisateur introuvable"));
+    if (profileId !== userId) {
+      const viewer = userId ? await users.findOne({ _id: makeId(userId) }) : null;
+      if (!canViewProfile(user, userId, new Set(viewer?.blockedUsers || []))) {
+        return json(res, 403, error("Profil privé ou indisponible"));
+      }
+    }
+    return json(res, 200, ok(profileId === userId ? privateUser(user) : publicUser(user)));
   }
 
   if (req.method === "PUT" && parts[0]) {
     if (!userId) return json(res, 401, error("Non authentifié"));
-    if (userId !== parts[0]) return json(res, 403, error("Action interdite"));
+    const profileId = validateId(parts[0], "Utilisateur");
+    if (userId !== profileId) return json(res, 403, error("Action interdite"));
     const body = await readBody(req);
+    const existing = await users.findOne({ _id: makeId(profileId) });
+    if (!existing) return json(res, 404, error("Utilisateur introuvable"));
     const patch = {
-      fullname: String(body.fullname || body.fullName || "").trim().slice(0, 80),
-      fullName: String(body.fullName || body.fullname || "").trim().slice(0, 80),
-      bio: String(body.bio || "").trim().slice(0, 300),
-      location: String(body.location || "").trim().slice(0, 80),
       updatedAt: new Date().toISOString(),
     };
-    await users.updateOne({ _id: makeId(parts[0]) }, { $set: patch });
-    const user = await users.findOne({ _id: makeId(parts[0]) });
-    return json(res, 200, ok(publicUser(user)));
+    if (body.username != null) {
+      const username = requireUsername(body.username);
+      const duplicate = await users.findOne({ username, _id: { $ne: makeId(profileId) } });
+      if (duplicate) return json(res, 409, error("Nom d'utilisateur déjà utilisé"));
+      patch.username = username;
+    }
+    if (body.fullname != null || body.fullName != null) {
+      const fullname = requireString(body.fullname || body.fullName, "Nom complet", { min: 1, max: 80 });
+      patch.fullname = fullname;
+      patch.fullName = fullname;
+    }
+    if (body.bio != null) patch.bio = String(body.bio).trim().slice(0, 300);
+    if (body.location != null) patch.location = String(body.location).trim().slice(0, 80);
+    if (body.profileVisibility != null) {
+      const visibility = String(body.profileVisibility).toUpperCase();
+      if (!["PUBLIC", "PRIVATE"].includes(visibility)) return json(res, 400, error("Visibilité invalide"));
+      patch.profileVisibility = visibility;
+    }
+    await users.updateOne({ _id: makeId(profileId) }, { $set: patch });
+    const user = await users.findOne({ _id: makeId(profileId) });
+    return json(res, 200, ok(privateUser(user)));
   }
 
   if (req.method === "POST" && (parts[1] === "avatar" || parts[1] === "cover")) {
     if (!userId) return json(res, 401, error("Non authentifié"));
-    if (userId !== parts[0]) return json(res, 403, error("Action interdite"));
+    const profileId = validateId(parts[0], "Utilisateur");
+    if (userId !== profileId) return json(res, 403, error("Action interdite"));
     const body = await readBody(req);
     validateMedia(body, { imageOnly: true, maxSize: 5 * 1024 * 1024 });
     const field = parts[1] === "avatar" ? "avatarUrl" : "coverUrl";
     const uploaded = await saveMedia(body.fileData, `mbolo/profiles/${parts[1]}`);
     await users.updateOne(
-      { _id: makeId(parts[0]) },
+      { _id: makeId(profileId) },
       { $set: { [field]: uploaded.url, [`${field}PublicId`]: uploaded.publicId || "", updatedAt: new Date().toISOString() } }
     );
     return json(res, 200, ok(uploaded));
+  }
+
+  if ((req.method === "POST" || req.method === "DELETE") && parts[1] === "block") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const targetId = validateId(parts[0], "Utilisateur");
+    if (targetId === userId) return json(res, 400, error("Vous ne pouvez pas vous bloquer vous-même"));
+    const target = await users.findOne({ _id: makeId(targetId) });
+    if (!target) return json(res, 404, error("Utilisateur introuvable"));
+    if (req.method === "POST") {
+      await users.updateOne({ _id: makeId(userId) }, { $addToSet: { blockedUsers: targetId }, $set: { updatedAt: new Date().toISOString() } });
+      await follows.deleteMany({ $or: [
+        { followerId: userId, followingId: targetId },
+        { followerId: targetId, followingId: userId },
+      ] });
+      await followRequests.deleteMany({ $or: [
+        { requesterId: userId, targetId },
+        { requesterId: targetId, targetId: userId },
+      ] });
+    } else {
+      await users.updateOne({ _id: makeId(userId) }, { $pull: { blockedUsers: targetId }, $set: { updatedAt: new Date().toISOString() } });
+    }
+    await syncFollowCounts(database, userId, targetId);
+    const updated = await users.findOne({ _id: makeId(userId) });
+    return json(res, 200, ok(privateUser(updated)));
   }
 
   return json(res, 404, error("Endpoint users introuvable"));
@@ -269,20 +408,44 @@ async function postRoutes(req, res, parts) {
   const database = await serviceDb("post");
   const posts = database.collection(COLLECTIONS.posts);
   const comments = database.collection(COLLECTIONS.comments);
+  const savedPosts = database.collection(COLLECTIONS.savedPosts);
   const auth = currentAuth(req);
   const userId = auth?.userId || null;
 
   if (req.method === "GET" && !parts[0]) {
     const url = new URL(req.url, "http://localhost");
     const { page, size } = parsePagination(url);
-    const total = await posts.countDocuments();
-    const rows = await posts.find().sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    const targetType = String(url.searchParams.get("targetType") || "").toUpperCase();
+    const targetId = url.searchParams.get("targetId");
+    const filter = userId
+      ? { $or: [{ visibility: { $ne: "PRIVATE" } }, { authorId: userId }] }
+      : { visibility: { $ne: "PRIVATE" } };
+    if (targetId && ["GROUP", "PAGE"].includes(targetType)) {
+      filter.targetType = targetType;
+      filter.targetId = validateId(targetId, "Cible");
+    } else {
+      filter.targetType = { $exists: false };
+    }
+    if (userId) {
+      const userDb = await serviceDb("user");
+      const viewer = await userDb.collection(COLLECTIONS.userProfiles).findOne({ _id: makeId(userId) });
+      const blockedByViewer = viewer?.blockedUsers || [];
+      const blockingViewer = await userDb.collection(COLLECTIONS.userProfiles)
+        .find({ blockedUsers: userId })
+        .project({ _id: 1 })
+        .toArray();
+      const hiddenAuthors = [...new Set([...blockedByViewer, ...blockingViewer.map(row => String(row._id))])];
+      if (hiddenAuthors.length) filter.authorId = { $nin: hiddenAuthors };
+    }
+    const total = await posts.countDocuments(filter);
+    const rows = await posts.find(filter).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
     return json(res, 200, ok(pageResult(rows.map(normalizeDoc), page, size, total)));
   }
 
   if (req.method === "POST" && !parts[0]) {
     if (!userId) return json(res, 401, error("Non authentifié"));
     const body = await readBody(req);
+    const target = await resolvePostTarget(database, body, userId);
     if (Number(body.fileSize || 0) > 5 * 1024 * 1024) return json(res, 413, error("Image trop lourde"));
     const uploaded = String(body.fileData || "").startsWith("data:image/")
       ? await saveMedia(body.fileData, "mbolo/posts")
@@ -292,6 +455,8 @@ async function postRoutes(req, res, parts) {
     const result = await posts.insertOne({
       authorId: userId,
       content: body.content || "",
+      visibility: normalizeVisibility(body.visibility),
+      ...(target ? { targetType: target.type, targetId: target.id, targetName: target.name } : {}),
       mediaUrls,
       mediaPublicIds: uploaded?.publicId ? [uploaded.publicId] : [],
       likes: [],
@@ -309,8 +474,22 @@ async function postRoutes(req, res, parts) {
     return json(res, 200, normalizeDoc(post));
   }
 
+  if (req.method === "GET" && parts[0] === "saved") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const url = new URL(req.url, "http://localhost");
+    const { page, size } = parsePagination(url);
+    const saved = await savedPosts.find({ userId }).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    const postIds = saved.map((item) => makeId(item.postId));
+    const rows = postIds.length ? await posts.find({ _id: { $in: postIds } }).toArray() : [];
+    const byId = new Map(rows.filter((post) => canViewPost(post, userId)).map((post) => [String(post._id), normalizeDoc(post)]));
+    const ordered = saved.map((item) => byId.get(item.postId)).filter(Boolean);
+    const total = await savedPosts.countDocuments({ userId });
+    return json(res, 200, ok(pageResult(ordered, page, size, total)));
+  }
+
   if (req.method === "GET" && parts[0] && !parts[1]) {
     const post = await posts.findOne({ _id: makeId(parts[0]) });
+    if (post && !canViewPost(post, userId)) return json(res, 403, error("Publication privée"));
     return post ? json(res, 200, ok(normalizeDoc(post))) : json(res, 404, error("Post introuvable"));
   }
 
@@ -318,7 +497,8 @@ async function postRoutes(req, res, parts) {
     if (!userId) return json(res, 401, error("Non authentifié"));
     const post = await posts.findOne({ _id: makeId(validateId(parts[0], "Post")) });
     if (!post) return json(res, 404, error("Post introuvable"));
-    if (post.authorId !== userId && !hasAnyRole(auth, ["ADMIN", "MODERATOR"])) {
+    const canModerateContext = await canModeratePostTarget(database, post, userId);
+    if (post.authorId !== userId && !hasAnyRole(auth, ["ADMIN", "MODERATOR"]) && !canModerateContext) {
       return json(res, 403, error("Action interdite"));
     }
     await posts.deleteOne({ _id: post._id });
@@ -330,6 +510,7 @@ async function postRoutes(req, res, parts) {
     if (!userId) return json(res, 401, error("Non authentifié"));
     const post = await posts.findOne({ _id: makeId(parts[0]) });
     if (!post) return json(res, 404, error("Post introuvable"));
+    if (!canViewPost(post, userId)) return json(res, 403, error("Publication privée"));
     const likes = new Set(post?.likes || []);
     likes.has(userId) ? likes.delete(userId) : likes.add(userId);
     await posts.updateOne({ _id: makeId(parts[0]) }, { $set: { likes: [...likes], updatedAt: new Date().toISOString() } });
@@ -346,7 +527,29 @@ async function postRoutes(req, res, parts) {
     return json(res, 200, ok(normalizeDoc(updated)));
   }
 
+  if ((req.method === "POST" || req.method === "DELETE") && parts[1] === "save") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const post = await posts.findOne({ _id: makeId(validateId(parts[0], "Post")) });
+    if (!post) return json(res, 404, error("Post introuvable"));
+    if (!canViewPost(post, userId)) return json(res, 403, error("Publication privée"));
+
+    if (req.method === "POST") {
+      await savedPosts.updateOne(
+        { userId, postId: parts[0] },
+        { $setOnInsert: { userId, postId: parts[0], authorId: post.authorId, createdAt: new Date().toISOString() } },
+        { upsert: true }
+      );
+      return json(res, 200, ok({ saved: true }, "Publication enregistrée"));
+    }
+
+    await savedPosts.deleteOne({ userId, postId: parts[0] });
+    return json(res, 200, ok({ saved: false }, "Publication retirée"));
+  }
+
   if (req.method === "GET" && parts[1] === "comments") {
+    const post = await posts.findOne({ _id: makeId(validateId(parts[0], "Post")) });
+    if (!post) return json(res, 404, error("Post introuvable"));
+    if (!canViewPost(post, userId)) return json(res, 403, error("Publication privée"));
     const url = new URL(req.url, "http://localhost");
     const { page, size } = parsePagination(url);
     const filter = { postId: parts[0] };
@@ -361,6 +564,7 @@ async function postRoutes(req, res, parts) {
     const content = requireString(body.content, "Commentaire", { min: 1, max: 1000 });
     const post = await posts.findOne({ _id: makeId(validateId(parts[0], "Post")) });
     if (!post) return json(res, 404, error("Post introuvable"));
+    if (!canViewPost(post, userId)) return json(res, 403, error("Publication privée"));
     const now = new Date().toISOString();
     const result = await comments.insertOne({ postId: parts[0], authorId: userId, content, createdAt: now, updatedAt: now });
     await posts.updateOne({ _id: post._id }, { $inc: { commentsCount: 1 }, $set: { updatedAt: now } });
@@ -382,6 +586,7 @@ async function postRoutes(req, res, parts) {
     const post = await posts.findOne({ _id: makeId(validateId(parts[0], "Post")) });
     const comment = await comments.findOne({ _id: makeId(validateId(parts[2], "Commentaire")), postId: parts[0] });
     if (!post || !comment) return json(res, 404, error("Commentaire introuvable"));
+    if (!canViewPost(post, userId)) return json(res, 403, error("Publication privée"));
     const allowed = comment.authorId === userId || post.authorId === userId || hasAnyRole(auth, ["ADMIN", "MODERATOR"]);
     if (!allowed) return json(res, 403, error("Action interdite"));
     await comments.deleteOne({ _id: comment._id });
@@ -400,7 +605,10 @@ async function storyRoutes(req, res, parts) {
   const now = new Date();
 
   if (req.method === "GET" && !parts[0]) {
-    const rows = await stories.find({ expiresAt: { $gt: now.toISOString() } }).sort({ createdAt: -1 }).limit(100).toArray();
+    const filter = userId
+      ? { expiresAt: { $gt: now.toISOString() }, $or: [{ visibility: { $ne: "PRIVATE" } }, { userId }] }
+      : { expiresAt: { $gt: now.toISOString() }, visibility: { $ne: "PRIVATE" } };
+    const rows = await stories.find(filter).sort({ createdAt: -1 }).limit(100).toArray();
     return json(res, 200, ok(rows.map(normalizeDoc)));
   }
 
@@ -426,6 +634,7 @@ async function storyRoutes(req, res, parts) {
       mediaUrl: uploaded?.url || "",
       mediaPublicId: uploaded?.publicId || "",
       content: body.content || "",
+      visibility: normalizeVisibility(body.visibility),
       backgroundColor: body.backgroundColor || "linear-gradient(135deg, #2563eb 0%, #db2777 100%)",
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
@@ -448,7 +657,10 @@ async function storyRoutes(req, res, parts) {
 
   if (req.method === "POST" && parts[1] === "seen") {
     if (!userId) return json(res, 401, error("Non authentifié"));
-    await stories.updateOne({ _id: makeId(parts[0]) }, { $addToSet: { seenBy: userId }, $inc: { views: 1 } });
+    const story = await stories.findOne({ _id: makeId(validateId(parts[0], "Story")) });
+    if (!story) return json(res, 404, error("Story introuvable"));
+    if (!canViewStory(story, userId, now)) return json(res, 403, error("Story privée"));
+    await stories.updateOne({ _id: story._id }, { $addToSet: { seenBy: userId }, $inc: { views: 1 } });
     return json(res, 200, ok(null));
   }
 
@@ -606,6 +818,351 @@ async function videoRoutes(req, res, parts) {
   }
 
   return json(res, 404, error("Endpoint videos introuvable"));
+}
+
+async function groupRoutes(req, res, parts) {
+  const database = await serviceDb("post");
+  const groups = database.collection(COLLECTIONS.groups);
+  const members = database.collection(COLLECTIONS.groupMembers);
+  const auth = currentAuth(req);
+  const userId = auth?.userId || null;
+
+  if (req.method === "GET" && !parts[0]) {
+    const url = new URL(req.url, "http://localhost");
+    const q = validateSearch(url.searchParams.get("q"));
+    const filter = q
+      ? { $or: [
+          { name: { $regex: escapeRegex(q), $options: "i" } },
+          { description: { $regex: escapeRegex(q), $options: "i" } },
+        ] }
+      : {};
+    const rows = await groups.find(filter).sort({ membersCount: -1, createdAt: -1 }).limit(50).toArray();
+    return json(res, 200, ok(rows.map(normalizeDoc)));
+  }
+
+  if (req.method === "POST" && !parts[0]) {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const body = await readBody(req);
+    const name = requireString(body.name, "Nom du groupe", { min: 3, max: 80 });
+    const slug = await uniqueSlug(groups, name);
+    const now = new Date().toISOString();
+    const result = await groups.insertOne({
+      name,
+      slug,
+      description: String(body.description || "").trim().slice(0, 300),
+      visibility: ["PUBLIC", "PRIVATE"].includes(String(body.visibility || "").toUpperCase())
+        ? String(body.visibility).toUpperCase()
+        : "PUBLIC",
+      ownerId: userId,
+      admins: [userId],
+      membersCount: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const groupId = String(result.insertedId);
+    await members.insertOne({ groupId, userId, role: "ADMIN", status: "ACTIVE", createdAt: now });
+    const group = await groups.findOne({ _id: result.insertedId });
+    return json(res, 200, ok(normalizeDoc(group), "Groupe créé"));
+  }
+
+  if (req.method === "GET" && parts[1] === "members") {
+    const groupId = validateId(parts[0], "Groupe");
+    const group = await groups.findOne({ _id: makeId(groupId) });
+    if (!group) return json(res, 404, error("Groupe introuvable"));
+    const rows = await members.find({ groupId, status: "ACTIVE" }).sort({ role: 1, createdAt: 1 }).limit(200).toArray();
+    const userDb = await serviceDb("user");
+    const profiles = rows.length
+      ? await userDb.collection(COLLECTIONS.userProfiles).find({ _id: { $in: rows.map(row => makeId(row.userId)) } }).toArray()
+      : [];
+    const byId = new Map(profiles.map(profile => [String(profile._id), publicUser(profile)]));
+    return json(res, 200, ok(rows.map(row => ({ ...normalizeDoc(row), user: byId.get(row.userId) || null }))));
+  }
+
+  if ((req.method === "POST" || req.method === "DELETE") && parts[1] === "members") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const groupId = validateId(parts[0], "Groupe");
+    const group = await groups.findOne({ _id: makeId(groupId) });
+    if (!group) return json(res, 404, error("Groupe introuvable"));
+
+    if (req.method === "POST") {
+      const status = group.visibility === "PRIVATE" ? "PENDING" : "ACTIVE";
+      await members.updateOne(
+        { groupId, userId },
+        { $setOnInsert: { groupId, userId, role: "MEMBER", status, createdAt: new Date().toISOString() } },
+        { upsert: true }
+      );
+      if (status === "PENDING") {
+        await createNotification(database, group.ownerId, {
+          type: "group_request",
+          title: "Demande d'adhésion",
+          body: `Nouvelle demande pour ${group.name}`,
+          actorId: userId,
+          entityId: groupId,
+        });
+      }
+    } else {
+      const targetUserId = parts[2] ? validateId(parts[2], "Utilisateur") : userId;
+      const isAdmin = group.ownerId === userId || (Array.isArray(group.admins) && group.admins.includes(userId));
+      if (targetUserId !== userId && !isAdmin) return json(res, 403, error("Action interdite"));
+      if (group.ownerId === targetUserId) return json(res, 400, error("Le propriétaire ne peut pas être retiré"));
+      await members.deleteOne({ groupId, userId: targetUserId });
+    }
+
+    const membersCount = await members.countDocuments({ groupId, status: "ACTIVE" });
+    await groups.updateOne({ _id: group._id }, { $set: { membersCount, updatedAt: new Date().toISOString() } });
+    const updated = await groups.findOne({ _id: group._id });
+    return json(res, 200, ok(normalizeDoc(updated)));
+  }
+
+  if (req.method === "GET" && parts[1] === "requests") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const groupId = validateId(parts[0], "Groupe");
+    const group = await groups.findOne({ _id: makeId(groupId) });
+    if (!group) return json(res, 404, error("Groupe introuvable"));
+    const isAdmin = group.ownerId === userId || (Array.isArray(group.admins) && group.admins.includes(userId));
+    if (!isAdmin) return json(res, 403, error("Action interdite"));
+    const rows = await members.find({ groupId, status: "PENDING" }).sort({ createdAt: -1 }).limit(50).toArray();
+    const userDb = await serviceDb("user");
+    const profiles = rows.length
+      ? await userDb.collection(COLLECTIONS.userProfiles).find({ _id: { $in: rows.map(row => makeId(row.userId)) } }).toArray()
+      : [];
+    const byId = new Map(profiles.map(profile => [String(profile._id), publicUser(profile)]));
+    return json(res, 200, ok(rows.map(row => ({ ...normalizeDoc(row), user: byId.get(row.userId) || null }))));
+  }
+
+  if ((req.method === "POST" || req.method === "DELETE") && parts[1] === "requests" && parts[2]) {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const groupId = validateId(parts[0], "Groupe");
+    const requestUserId = validateId(parts[2], "Utilisateur");
+    const group = await groups.findOne({ _id: makeId(groupId) });
+    if (!group) return json(res, 404, error("Groupe introuvable"));
+    const isAdmin = group.ownerId === userId || (Array.isArray(group.admins) && group.admins.includes(userId));
+    if (!isAdmin) return json(res, 403, error("Action interdite"));
+
+    if (req.method === "POST") {
+      await members.updateOne(
+        { groupId, userId: requestUserId, status: "PENDING" },
+        { $set: { status: "ACTIVE", approvedBy: userId, approvedAt: new Date().toISOString() } }
+      );
+    } else {
+      await members.deleteOne({ groupId, userId: requestUserId, status: "PENDING" });
+    }
+
+    const membersCount = await members.countDocuments({ groupId, status: "ACTIVE" });
+    await groups.updateOne({ _id: group._id }, { $set: { membersCount, updatedAt: new Date().toISOString() } });
+    const updated = await groups.findOne({ _id: group._id });
+    return json(res, 200, ok(normalizeDoc(updated)));
+  }
+
+  if (req.method === "PUT" && parts[1] === "members" && parts[2] && parts[3] === "role") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const groupId = validateId(parts[0], "Groupe");
+    const memberUserId = validateId(parts[2], "Utilisateur");
+    const group = await groups.findOne({ _id: makeId(groupId) });
+    if (!group) return json(res, 404, error("Groupe introuvable"));
+    if (group.ownerId !== userId) return json(res, 403, error("Seul le propriétaire peut modifier les rôles"));
+    if (memberUserId === group.ownerId) return json(res, 400, error("Le propriétaire garde son rôle"));
+    const body = await readBody(req);
+    const role = String(body.role || "").toUpperCase();
+    if (!["MEMBER", "MODERATOR", "ADMIN"].includes(role)) return json(res, 400, error("Rôle invalide"));
+    const result = await members.updateOne(
+      { groupId, userId: memberUserId, status: "ACTIVE" },
+      { $set: { role, updatedAt: new Date().toISOString() } }
+    );
+    if (!result.matchedCount) return json(res, 404, error("Membre introuvable"));
+    const admins = role === "ADMIN"
+      ? [...new Set([...(group.admins || []), memberUserId])]
+      : (group.admins || []).filter(id => id !== memberUserId);
+    await groups.updateOne({ _id: group._id }, { $set: { admins, updatedAt: new Date().toISOString() } });
+    const updated = await groups.findOne({ _id: group._id });
+    return json(res, 200, ok(normalizeDoc(updated)));
+  }
+
+  if (req.method === "GET" && parts[0]) {
+    const groupId = validateId(parts[0], "Groupe");
+    const group = await groups.findOne({ _id: makeId(groupId) });
+    return group ? json(res, 200, ok(normalizeDoc(group))) : json(res, 404, error("Groupe introuvable"));
+  }
+
+  return json(res, 404, error("Endpoint groupes introuvable"));
+}
+
+async function pageRoutes(req, res, parts) {
+  const database = await serviceDb("post");
+  const pages = database.collection(COLLECTIONS.pages);
+  const followers = database.collection(COLLECTIONS.pageFollowers);
+  const auth = currentAuth(req);
+  const userId = auth?.userId || null;
+
+  if (req.method === "GET" && !parts[0]) {
+    const url = new URL(req.url, "http://localhost");
+    const q = validateSearch(url.searchParams.get("q"));
+    const filter = q
+      ? { $or: [
+          { name: { $regex: escapeRegex(q), $options: "i" } },
+          { description: { $regex: escapeRegex(q), $options: "i" } },
+          { category: { $regex: escapeRegex(q), $options: "i" } },
+        ] }
+      : {};
+    const rows = await pages.find(filter).sort({ followersCount: -1, createdAt: -1 }).limit(50).toArray();
+    return json(res, 200, ok(rows.map(normalizeDoc)));
+  }
+
+  if (req.method === "POST" && !parts[0]) {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const body = await readBody(req);
+    const name = requireString(body.name, "Nom de la page", { min: 3, max: 80 });
+    const slug = await uniqueSlug(pages, name);
+    const now = new Date().toISOString();
+    const result = await pages.insertOne({
+      name,
+      slug,
+      category: requireString(body.category || "Communauté", "Catégorie", { min: 2, max: 60 }),
+      description: String(body.description || "").trim().slice(0, 300),
+      ownerId: userId,
+      admins: [userId],
+      followersCount: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const pageId = String(result.insertedId);
+    await followers.insertOne({ pageId, userId, role: "ADMIN", createdAt: now });
+    const page = await pages.findOne({ _id: result.insertedId });
+    return json(res, 200, ok(normalizeDoc(page), "Page créée"));
+  }
+
+  if ((req.method === "POST" || req.method === "DELETE") && parts[1] === "followers") {
+    if (!userId) return json(res, 401, error("Non authentifié"));
+    const pageId = validateId(parts[0], "Page");
+    const page = await pages.findOne({ _id: makeId(pageId) });
+    if (!page) return json(res, 404, error("Page introuvable"));
+
+    if (req.method === "POST") {
+      await followers.updateOne(
+        { pageId, userId },
+        { $setOnInsert: { pageId, userId, role: "FOLLOWER", createdAt: new Date().toISOString() } },
+        { upsert: true }
+      );
+    } else {
+      if (page.ownerId === userId) return json(res, 400, error("Le propriétaire ne peut pas se désabonner"));
+      await followers.deleteOne({ pageId, userId });
+    }
+
+    const followersCount = await followers.countDocuments({ pageId });
+    await pages.updateOne({ _id: page._id }, { $set: { followersCount, updatedAt: new Date().toISOString() } });
+    const updated = await pages.findOne({ _id: page._id });
+    return json(res, 200, ok(normalizeDoc(updated)));
+  }
+
+  if (req.method === "GET" && parts[0]) {
+    const pageId = validateId(parts[0], "Page");
+    const page = await pages.findOne({ _id: makeId(pageId) });
+    return page ? json(res, 200, ok(normalizeDoc(page))) : json(res, 404, error("Page introuvable"));
+  }
+
+  return json(res, 404, error("Endpoint pages introuvable"));
+}
+
+async function resolvePostTarget(database, body, userId) {
+  const targetType = String(body.targetType || "").toUpperCase();
+  if (!targetType) return null;
+  if (!["GROUP", "PAGE"].includes(targetType)) {
+    const err = new Error("Cible de publication invalide");
+    err.status = 400;
+    throw err;
+  }
+  const targetId = validateId(body.targetId, "Cible");
+
+  if (targetType === "GROUP") {
+    const group = await database.collection(COLLECTIONS.groups).findOne({ _id: makeId(targetId) });
+    if (!group) {
+      const err = new Error("Groupe introuvable");
+      err.status = 404;
+      throw err;
+    }
+    const membership = await database.collection(COLLECTIONS.groupMembers).findOne({ groupId: targetId, userId, status: "ACTIVE" });
+    if (!membership) {
+      const err = new Error("Rejoignez le groupe avant de publier");
+      err.status = 403;
+      throw err;
+    }
+    return { type: "GROUP", id: targetId, name: group.name };
+  }
+
+  const page = await database.collection(COLLECTIONS.pages).findOne({ _id: makeId(targetId) });
+  if (!page) {
+    const err = new Error("Page introuvable");
+    err.status = 404;
+    throw err;
+  }
+  const isAdmin = page.ownerId === userId || (Array.isArray(page.admins) && page.admins.includes(userId));
+  if (!isAdmin) {
+    const err = new Error("Seuls les administrateurs peuvent publier sur cette page");
+    err.status = 403;
+    throw err;
+  }
+  return { type: "PAGE", id: targetId, name: page.name };
+}
+
+async function canModeratePostTarget(database, post, userId) {
+  if (!post?.targetType || !post?.targetId || !userId) return false;
+
+  if (post.targetType === "GROUP") {
+    const group = await database.collection(COLLECTIONS.groups).findOne({ _id: makeId(post.targetId) });
+    if (!group) return false;
+    if (group.ownerId === userId || (Array.isArray(group.admins) && group.admins.includes(userId))) return true;
+    const membership = await database.collection(COLLECTIONS.groupMembers).findOne({
+      groupId: post.targetId,
+      userId,
+      status: "ACTIVE",
+      role: { $in: ["MODERATOR", "ADMIN"] },
+    });
+    return Boolean(membership);
+  }
+
+  if (post.targetType === "PAGE") {
+    const page = await database.collection(COLLECTIONS.pages).findOne({ _id: makeId(post.targetId) });
+    return Boolean(page && (page.ownerId === userId || (Array.isArray(page.admins) && page.admins.includes(userId))));
+  }
+
+  return false;
+}
+
+async function recommendationRoutes(req, res) {
+  const userId = currentUserId(req);
+  if (!userId) return json(res, 401, error("Non authentifié"));
+
+  const userDb = await serviceDb("user");
+  const postDb = await serviceDb("post");
+  const [users, groups, pages, posts] = await Promise.all([
+    userDb.collection(COLLECTIONS.userProfiles)
+      .find({ _id: { $ne: makeId(userId) } })
+      .sort({ followersCount: -1, createdAt: -1 })
+      .limit(8)
+      .toArray(),
+    postDb.collection(COLLECTIONS.groups)
+      .find({ visibility: "PUBLIC" })
+      .sort({ membersCount: -1, createdAt: -1 })
+      .limit(8)
+      .toArray(),
+    postDb.collection(COLLECTIONS.pages)
+      .find()
+      .sort({ followersCount: -1, createdAt: -1 })
+      .limit(8)
+      .toArray(),
+    postDb.collection(COLLECTIONS.posts)
+      .find()
+      .sort({ createdAt: -1 })
+      .limit(12)
+      .toArray(),
+  ]);
+
+  return json(res, 200, ok({
+    people: users.map(publicUser),
+    groups: groups.map(normalizeDoc),
+    pages: pages.map(normalizeDoc),
+    posts: posts.map(normalizeDoc),
+  }));
 }
 
 async function chatRoutes(req, res, parts) {
@@ -831,6 +1388,33 @@ function hasAnyRole(auth, roles) {
   return roles.some((role) => userRoles.includes(role));
 }
 
+function canViewProfile(profile, viewerId, viewerBlocked = new Set()) {
+  const profileId = String(profile?._id || profile?.id || "");
+  if (!profileId) return false;
+  if (viewerId && profileId === viewerId) return true;
+  if (viewerBlocked.has(profileId)) return false;
+  if (Array.isArray(profile.blockedUsers) && viewerId && profile.blockedUsers.includes(viewerId)) return false;
+  return String(profile.profileVisibility || "PUBLIC").toUpperCase() !== "PRIVATE";
+}
+
+function normalizeVisibility(value) {
+  const visibility = String(value || "PUBLIC").toUpperCase();
+  return ["PUBLIC", "PRIVATE"].includes(visibility) ? visibility : "PUBLIC";
+}
+
+function canViewPost(post, viewerId) {
+  if (!post) return false;
+  if (String(post.authorId || "") === String(viewerId || "")) return true;
+  return String(post.visibility || "PUBLIC").toUpperCase() !== "PRIVATE";
+}
+
+function canViewStory(story, viewerId, now = new Date()) {
+  if (!story) return false;
+  if (new Date(story.expiresAt).getTime() <= now.getTime()) return false;
+  if (String(story.userId || "") === String(viewerId || "")) return true;
+  return String(story.visibility || "PUBLIC").toUpperCase() !== "PRIVATE";
+}
+
 async function getConversationForUser(conversations, conversationId, userId) {
   if (!conversationId) return null;
   return conversations.findOne({ _id: makeId(validateId(conversationId, "Conversation")), participants: userId });
@@ -874,6 +1458,22 @@ async function createNotification(database, userId, payload) {
     read: false,
     createdAt: new Date().toISOString(),
   });
+}
+
+async function uniqueSlug(collection, name) {
+  const base = String(name || "item")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "item";
+  let slug = base;
+  let suffix = 2;
+  while (await collection.findOne({ slug })) {
+    slug = `${base}-${suffix++}`;
+  }
+  return slug;
 }
 
 async function saveMedia(fileData, folder, options = {}) {

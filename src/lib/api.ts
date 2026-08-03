@@ -8,6 +8,8 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:8080');
 const WS_URL = import.meta.env.VITE_WS_URL ?? (import.meta.env.PROD ? '' : 'ws://localhost:8080');
+const REQUEST_TIMEOUT_MS = 15_000;
+const GET_CACHE_TTL_MS = 20_000;
 
 // Types
 export interface ApiResponse<T = any> {
@@ -63,6 +65,8 @@ export interface UserProfile {
   location?: string;
   followersCount?: number;
   followingCount?: number;
+  profileVisibility?: "PUBLIC" | "PRIVATE";
+  blockedUsers?: string[];
   createdAt: string;
 }
 
@@ -70,6 +74,10 @@ export interface Post {
   id: string;
   authorId: string;
   content: string;
+  targetType?: "GROUP" | "PAGE";
+  targetId?: string;
+  targetName?: string;
+  visibility?: "PUBLIC" | "PRIVATE";
   mediaUrls?: string[];
   likes: string[];
   commentsCount: number;
@@ -124,6 +132,70 @@ export interface SearchResponse {
   conversations: Conversation[];
 }
 
+export interface SocialGroup {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  visibility: "PUBLIC" | "PRIVATE";
+  ownerId: string;
+  admins?: string[];
+  membersCount: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface SocialPage {
+  id: string;
+  name: string;
+  slug: string;
+  category: string;
+  description?: string;
+  ownerId: string;
+  admins?: string[];
+  followersCount: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface GroupJoinRequest {
+  id: string;
+  groupId: string;
+  userId: string;
+  user?: UserProfile | null;
+  role: "MEMBER" | "ADMIN";
+  status: "PENDING" | "ACTIVE";
+  createdAt: string;
+}
+
+export interface GroupMember {
+  id: string;
+  groupId: string;
+  userId: string;
+  user?: UserProfile | null;
+  role: "MEMBER" | "MODERATOR" | "ADMIN";
+  status: "ACTIVE";
+  createdAt: string;
+}
+
+export interface RecommendationResponse {
+  people: UserProfile[];
+  groups: SocialGroup[];
+  pages: SocialPage[];
+  posts: Post[];
+}
+
+export interface FollowRequest {
+  id: string;
+  requesterId: string;
+  targetId: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  requester?: UserProfile | null;
+  createdAt: string;
+}
+
+export type FollowStatus = "NONE" | "PENDING" | "FOLLOWING";
+
 // Token management
 export const tokenManager = {
   getAccessToken: () => localStorage.getItem('token') || localStorage.getItem('accessToken'),
@@ -149,13 +221,38 @@ export const tokenManager = {
 // HTTP Client
 class ApiClient {
   private baseURL: string;
+  private getCache = new Map<string, { expiresAt: number; value: unknown }>();
+  private pendingGets = new Map<string, Promise<unknown>>();
 
   constructor(baseURL: string) {
     this.baseURL = baseURL;
   }
 
+  private getCacheKey(endpoint: string, token: string | null) {
+    return `${this.baseURL}${endpoint}::${token || 'anonymous'}`;
+  }
+
+  private clearReadCache() {
+    this.getCache.clear();
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = tokenManager.getAccessToken();
+    const method = String(options.method || 'GET').toUpperCase();
+    const isRead = method === 'GET';
+    const cacheKey = isRead ? this.getCacheKey(endpoint, token) : '';
+
+    if (isRead) {
+      const cached = this.getCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.value as T;
+      }
+
+      const pending = this.pendingGets.get(cacheKey);
+      if (pending) {
+        return pending as Promise<T>;
+      }
+    }
     
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -165,12 +262,22 @@ class ApiClient {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const signal = options.signal;
+
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
     
-    try {
+    const requestPromise = (async () => {
       const response = await fetch(`${this.baseURL}${endpoint}`, {
         ...options,
         headers,
         credentials: 'include',
+        signal: controller.signal,
       });
       
       if (response.status === 401) {
@@ -183,6 +290,7 @@ class ApiClient {
             ...options,
             headers,
             credentials: 'include',
+            signal: controller.signal,
           });
           return this.handleResponse<T>(retryResponse);
         } else {
@@ -199,7 +307,21 @@ class ApiClient {
         }
       }
       
-      return this.handleResponse<T>(response);
+      const result = await this.handleResponse<T>(response);
+      if (isRead) {
+        this.getCache.set(cacheKey, { expiresAt: Date.now() + GET_CACHE_TTL_MS, value: result });
+      } else {
+        this.clearReadCache();
+      }
+      return result;
+    })();
+
+    if (isRead) {
+      this.pendingGets.set(cacheKey, requestPromise);
+    }
+
+    try {
+      return await requestPromise;
     } catch (error) {
       const status = getHttpStatus(error);
       if (shouldNotifyHttpError(status)) {
@@ -216,6 +338,11 @@ class ApiClient {
         console.error('API Request Error:', { endpoint, status, error });
       }
       throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      if (isRead) {
+        this.pendingGets.delete(cacheKey);
+      }
     }
   }
 
@@ -306,7 +433,9 @@ class ApiClient {
         }),
       });
 
-      return this.handleResponse(response);
+      const result = await this.handleResponse(response);
+      this.clearReadCache();
+      return result;
     } catch (error) {
       const status = getHttpStatus(error);
       if (shouldNotifyHttpError(status)) {
@@ -377,11 +506,15 @@ export const userApi = {
     return unwrapApiData<UserProfile[]>(response, []);
   },
   
-  followUser: (userId: string) => 
-    api.post(`/api/users/${userId}/follow`),
+  followUser: async (userId: string) => {
+    const response = await api.post<ApiResponse<{ status: FollowStatus }> | { status: FollowStatus }>(`/api/users/${userId}/follow`);
+    return unwrapApiData<{ status: FollowStatus }>(response, { status: "NONE" });
+  },
   
-  unfollowUser: (userId: string) => 
-    api.delete(`/api/users/${userId}/follow`),
+  unfollowUser: async (userId: string) => {
+    const response = await api.delete<ApiResponse<{ status: FollowStatus }> | { status: FollowStatus }>(`/api/users/${userId}/follow`);
+    return unwrapApiData<{ status: FollowStatus }>(response, { status: "NONE" });
+  },
   
   getFollowers: async (userId: string) => {
     const response = await api.get<ApiResponse<UserProfile[]> | UserProfile[]>(`/api/users/${userId}/followers`);
@@ -397,13 +530,51 @@ export const userApi = {
     const response = await api.get<ApiResponse<boolean> | boolean>(`/api/users/${userId}/is-following`);
     return unwrapApiData<boolean>(response, false);
   },
+
+  getFollowStatus: async (userId: string) => {
+    const response = await api.get<ApiResponse<{ status: FollowStatus }> | { status: FollowStatus }>(`/api/users/${userId}/follow-status`);
+    return unwrapApiData<{ status: FollowStatus }>(response, { status: "NONE" }).status;
+  },
+
+  getFollowRequests: async () => {
+    const response = await api.get<ApiResponse<FollowRequest[]> | FollowRequest[]>('/api/users/me/follow-requests');
+    return unwrapApiData<FollowRequest[]>(response, []);
+  },
+
+  approveFollowRequest: async (requesterId: string) => {
+    const response = await api.post<ApiResponse<{ status: FollowStatus }> | { status: FollowStatus }>(`/api/users/me/follow-requests/${requesterId}`);
+    return unwrapApiData<{ status: FollowStatus }>(response, { status: "NONE" });
+  },
+
+  rejectFollowRequest: async (requesterId: string) => {
+    const response = await api.delete<ApiResponse<{ status: FollowStatus }> | { status: FollowStatus }>(`/api/users/me/follow-requests/${requesterId}`);
+    return unwrapApiData<{ status: FollowStatus }>(response, { status: "NONE" });
+  },
+
+  blockUser: async (userId: string) => {
+    const response = await api.post<ApiResponse<UserProfile> | UserProfile>(`/api/users/${userId}/block`);
+    return unwrapApiData<UserProfile>(response, response as UserProfile);
+  },
+
+  unblockUser: async (userId: string) => {
+    const response = await api.delete<ApiResponse<UserProfile> | UserProfile>(`/api/users/${userId}/block`);
+    return unwrapApiData<UserProfile>(response, response as UserProfile);
+  },
+
+  getBlockedUsers: async () => {
+    const response = await api.get<ApiResponse<UserProfile[]> | UserProfile[]>('/api/users/me/blocked');
+    return unwrapApiData<UserProfile[]>(response, []);
+  },
 };
 
 // Post API
 export const postApi = {
-  getFeed: async (page = 0, size = 20) => {
+  getFeed: async (page = 0, size = 20, target?: { targetType: "GROUP" | "PAGE"; targetId: string }) => {
     try {
-      const res = await api.get<any>(`/api/posts?page=${page}&size=${size}`);
+      const targetParams = target
+        ? `&targetType=${encodeURIComponent(target.targetType)}&targetId=${encodeURIComponent(target.targetId)}`
+        : "";
+      const res = await api.get<any>(`/api/posts?page=${page}&size=${size}${targetParams}`);
       const data = unwrapApiData<any>(res, {});
       return data?.data?.content || data?.content || (Array.isArray(data) ? data : []);
     } catch (error) {
@@ -416,11 +587,21 @@ export const postApi = {
     const response = await api.get<ApiResponse<Post>>(`/api/posts/${postId}`);
     return response.data!;
   },
+
+  getSavedPosts: async (page = 0, size = 50) => {
+    const response = await api.get<ApiResponse<{ content?: Post[] }> | { content?: Post[] }>(`/api/posts/saved?page=${page}&size=${size}`);
+    const data = unwrapApiData<{ content?: Post[] }>(response, { content: [] });
+    return data.content || [];
+  },
   
-  createPost: async (data: { content: string }, mediaFiles?: File[]) => {
+  createPost: async (data: { content: string; targetType?: "GROUP" | "PAGE"; targetId?: string; visibility?: "PUBLIC" | "PRIVATE" }, mediaFiles?: File[]) => {
     if (mediaFiles && mediaFiles.length > 0) {
-      // Handle file upload separately
-      const response = await api.uploadFile('/api/posts', mediaFiles[0], { content: data.content });
+      const response = await api.uploadFile('/api/posts', mediaFiles[0], {
+        content: data.content,
+        visibility: data.visibility || 'PUBLIC',
+        targetType: data.targetType || '',
+        targetId: data.targetId || '',
+      });
       return unwrapApiData<Post>(response, response);
     }
     const response = await api.post<ApiResponse<Post> | Post>('/api/posts', data);
@@ -428,13 +609,19 @@ export const postApi = {
   },
   
   deletePost: (postId: string) => 
-    api.delete(`/api/posts/${postId}`),
+    api.delete<ApiResponse<null>>(`/api/posts/${postId}`),
   
   likePost: (postId: string) => 
     api.post(`/api/posts/${postId}/like`),
   
   unlikePost: (postId: string) => 
     api.post(`/api/posts/${postId}/like`), // Toggle like/unlike
+
+  savePost: (postId: string) =>
+    api.post<ApiResponse<{ saved: boolean }>>(`/api/posts/${postId}/save`),
+
+  unsavePost: (postId: string) =>
+    api.delete<ApiResponse<{ saved: boolean }>>(`/api/posts/${postId}/save`),
   
   getComments: async (postId: string) => {
     const response = await api.get<ApiResponse<any>>(`/api/posts/${postId}/comments`);
@@ -470,6 +657,7 @@ export interface StoryRecord {
   seen: boolean;
   duration?: number;
   views?: number;
+  visibility?: "PUBLIC" | "PRIVATE";
 }
 
 export const storyApi = {
@@ -487,6 +675,7 @@ export const storyApi = {
           mediaType: story.mediaType || 'image',
           content: story.content || '',
           backgroundColor: story.backgroundColor || '',
+          visibility: story.visibility || 'PUBLIC',
           username: story.username || '',
           avatarInitials: story.avatarInitials || '',
         })
@@ -499,7 +688,7 @@ export const storyApi = {
 
 export interface AppNotificationRecord {
   id: string;
-  type: "message" | "like" | "comment" | "story" | "follow";
+  type: "message" | "like" | "comment" | "story" | "follow" | "follow_request" | "group_request";
   title: string;
   body: string;
   avatar?: string;
@@ -526,6 +715,75 @@ export const searchApi = {
   global: async (query: string) => {
     const response = await api.get<ApiResponse<SearchResponse> | SearchResponse>(`/api/search?q=${encodeURIComponent(query)}`);
     return unwrapApiData<SearchResponse>(response, { users: [], posts: [], conversations: [] });
+  },
+};
+
+export const groupApi = {
+  list: async (query = "") => {
+    const response = await api.get<ApiResponse<SocialGroup[]> | SocialGroup[]>(`/api/groups?q=${encodeURIComponent(query)}`);
+    return unwrapApiData<SocialGroup[]>(response, []);
+  },
+  create: async (data: { name: string; description?: string; visibility?: "PUBLIC" | "PRIVATE" }) => {
+    const response = await api.post<ApiResponse<SocialGroup> | SocialGroup>('/api/groups', data);
+    return unwrapApiData<SocialGroup>(response, response as SocialGroup);
+  },
+  join: async (groupId: string) => {
+    const response = await api.post<ApiResponse<SocialGroup> | SocialGroup>(`/api/groups/${groupId}/members`);
+    return unwrapApiData<SocialGroup>(response, response as SocialGroup);
+  },
+  leave: async (groupId: string) => {
+    const response = await api.delete<ApiResponse<SocialGroup> | SocialGroup>(`/api/groups/${groupId}/members`);
+    return unwrapApiData<SocialGroup>(response, response as SocialGroup);
+  },
+  getMembers: async (groupId: string) => {
+    const response = await api.get<ApiResponse<GroupMember[]> | GroupMember[]>(`/api/groups/${groupId}/members`);
+    return unwrapApiData<GroupMember[]>(response, []);
+  },
+  removeMember: async (groupId: string, userId: string) => {
+    const response = await api.delete<ApiResponse<SocialGroup> | SocialGroup>(`/api/groups/${groupId}/members/${userId}`);
+    return unwrapApiData<SocialGroup>(response, response as SocialGroup);
+  },
+  getRequests: async (groupId: string) => {
+    const response = await api.get<ApiResponse<GroupJoinRequest[]> | GroupJoinRequest[]>(`/api/groups/${groupId}/requests`);
+    return unwrapApiData<GroupJoinRequest[]>(response, []);
+  },
+  approveRequest: async (groupId: string, userId: string) => {
+    const response = await api.post<ApiResponse<SocialGroup> | SocialGroup>(`/api/groups/${groupId}/requests/${userId}`);
+    return unwrapApiData<SocialGroup>(response, response as SocialGroup);
+  },
+  rejectRequest: async (groupId: string, userId: string) => {
+    const response = await api.delete<ApiResponse<SocialGroup> | SocialGroup>(`/api/groups/${groupId}/requests/${userId}`);
+    return unwrapApiData<SocialGroup>(response, response as SocialGroup);
+  },
+  setMemberRole: async (groupId: string, userId: string, role: "MEMBER" | "MODERATOR" | "ADMIN") => {
+    const response = await api.put<ApiResponse<SocialGroup> | SocialGroup>(`/api/groups/${groupId}/members/${userId}/role`, { role });
+    return unwrapApiData<SocialGroup>(response, response as SocialGroup);
+  },
+};
+
+export const pageApi = {
+  list: async (query = "") => {
+    const response = await api.get<ApiResponse<SocialPage[]> | SocialPage[]>(`/api/pages?q=${encodeURIComponent(query)}`);
+    return unwrapApiData<SocialPage[]>(response, []);
+  },
+  create: async (data: { name: string; category: string; description?: string }) => {
+    const response = await api.post<ApiResponse<SocialPage> | SocialPage>('/api/pages', data);
+    return unwrapApiData<SocialPage>(response, response as SocialPage);
+  },
+  follow: async (pageId: string) => {
+    const response = await api.post<ApiResponse<SocialPage> | SocialPage>(`/api/pages/${pageId}/followers`);
+    return unwrapApiData<SocialPage>(response, response as SocialPage);
+  },
+  unfollow: async (pageId: string) => {
+    const response = await api.delete<ApiResponse<SocialPage> | SocialPage>(`/api/pages/${pageId}/followers`);
+    return unwrapApiData<SocialPage>(response, response as SocialPage);
+  },
+};
+
+export const recommendationApi = {
+  get: async () => {
+    const response = await api.get<ApiResponse<RecommendationResponse> | RecommendationResponse>('/api/recommendations');
+    return unwrapApiData<RecommendationResponse>(response, { people: [], groups: [], pages: [], posts: [] });
   },
 };
 

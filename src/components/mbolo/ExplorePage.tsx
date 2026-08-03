@@ -1,7 +1,7 @@
 import { Search, TrendingUp, Hash, UserPlus, Grid3X3, Heart, MessageCircle } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { postApi, userApi, videoApi } from "@/lib/api";
+import { postApi, userApi } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const ExplorePage = () => {
@@ -17,7 +17,7 @@ const ExplorePage = () => {
     loadPosts();
   }, []);
 
-  const trendingTags = Array.from(
+  const trendingTags = useMemo(() => Array.from(
     posts.reduce((map, post) => {
       String(post.content || '').match(/#[\wÀ-ÿ]+/g)?.forEach((tag) => {
         const normalized = tag.toLowerCase();
@@ -26,8 +26,8 @@ const ExplorePage = () => {
       return map;
     }, new Map<string, number>())
   )
-    .map(([tag, count]) => ({ tag, posts: `${count} publication${count > 1 ? 's' : ''}` }))
-    .sort((a, b) => Number(b.posts.split(' ')[0]) - Number(a.posts.split(' ')[0]));
+    .map(([tag, count]) => ({ tag, count, posts: `${count} publication${count > 1 ? 's' : ''}` }))
+    .sort((a, b) => b.count - a.count), [posts]);
 
   const loadPosts = async () => {
     try {
@@ -37,7 +37,7 @@ const ExplorePage = () => {
         userApi.searchUsers(""),
       ]);
       setPosts(Array.isArray(data) ? data : []);
-      setUsers(userRows);
+      setUsers(Array.isArray(userRows) ? userRows : []);
     } catch {
       setPosts([]);
       setUsers([]);

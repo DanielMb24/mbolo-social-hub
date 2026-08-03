@@ -137,7 +137,7 @@ const TrendingSidebar = () => {
   };
 
   return (
-    <div className="w-80 space-y-4 sticky top-4">
+    <div className="w-full space-y-4 sticky top-4">
       {/* Tendances */}
       <div className="bg-card rounded-xl border shadow-sm overflow-hidden">
         <div className="p-4 border-b">

@@ -39,6 +39,12 @@ const App = () => {
   const [checkingSession, setCheckingSession] = useState(true);
 
   useEffect(() => {
+    if (!tokenManager.getAccessToken()) {
+      setIsAuth(false);
+      setCheckingSession(false);
+      return;
+    }
+
     authApi.getCurrentUser()
       .then((user) => setIsAuth(Boolean(user?.id)))
       .catch(() => {

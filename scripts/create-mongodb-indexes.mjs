@@ -29,17 +29,29 @@ try {
   const userDb = client.db(dbName("user"));
   await userDb.collection("user_profiles").createIndexes([
     { key: { username: 1 }, unique: true, name: "profile_username_unique" },
+    { key: { profileVisibility: 1, createdAt: -1 }, name: "profile_visibility_created" },
+    { key: { blockedUsers: 1 }, name: "profile_blocked_users" },
     { key: { username: "text", fullname: "text", bio: "text" }, name: "profile_text_search" },
   ]);
   await userDb.collection("user_follows").createIndexes([
     { key: { followerId: 1, followingId: 1 }, unique: true, name: "follow_pair_unique" },
     { key: { followingId: 1 }, name: "follow_following" },
   ]);
+  await userDb.collection("user_follow_requests").createIndexes([
+    { key: { requesterId: 1, targetId: 1 }, unique: true, name: "follow_request_pair_unique" },
+    { key: { targetId: 1, status: 1, createdAt: -1 }, name: "follow_request_target_status" },
+    { key: { requesterId: 1, status: 1, createdAt: -1 }, name: "follow_request_requester_status" },
+  ]);
 
   const postDb = client.db(dbName("post"));
   await postDb.collection("posts").createIndexes([
     { key: { createdAt: -1 }, name: "posts_created_desc" },
     { key: { authorId: 1, createdAt: -1 }, name: "posts_author_created" },
+    { key: { targetType: 1, targetId: 1, createdAt: -1 }, name: "posts_target_created" },
+  ]);
+  await postDb.collection("saved_posts").createIndexes([
+    { key: { userId: 1, postId: 1 }, unique: true, name: "saved_posts_user_post_unique" },
+    { key: { userId: 1, createdAt: -1 }, name: "saved_posts_user_created" },
   ]);
   await postDb.collection("comments").createIndexes([
     { key: { postId: 1, createdAt: 1 }, name: "comments_post_created" },
@@ -56,6 +68,24 @@ try {
   await postDb.collection("videos").createIndexes([
     { key: { createdAt: -1 }, name: "videos_created_desc" },
     { key: { userId: 1, createdAt: -1 }, name: "videos_user_created" },
+  ]);
+  await postDb.collection("groups").createIndexes([
+    { key: { slug: 1 }, unique: true, name: "groups_slug_unique" },
+    { key: { visibility: 1, createdAt: -1 }, name: "groups_visibility_created" },
+    { key: { name: "text", description: "text" }, name: "groups_text_search" },
+  ]);
+  await postDb.collection("group_members").createIndexes([
+    { key: { groupId: 1, userId: 1 }, unique: true, name: "group_members_group_user_unique" },
+    { key: { userId: 1, role: 1 }, name: "group_members_user_role" },
+  ]);
+  await postDb.collection("pages").createIndexes([
+    { key: { slug: 1 }, unique: true, name: "pages_slug_unique" },
+    { key: { ownerId: 1, createdAt: -1 }, name: "pages_owner_created" },
+    { key: { name: "text", description: "text", category: "text" }, name: "pages_text_search" },
+  ]);
+  await postDb.collection("page_followers").createIndexes([
+    { key: { pageId: 1, userId: 1 }, unique: true, name: "page_followers_page_user_unique" },
+    { key: { userId: 1, createdAt: -1 }, name: "page_followers_user_created" },
   ]);
 
   const chatDb = client.db(dbName("chat"));
