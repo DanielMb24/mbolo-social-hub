@@ -67,6 +67,10 @@ export interface UserProfile {
   followingCount?: number;
   profileVisibility?: "PUBLIC" | "PRIVATE";
   blockedUsers?: string[];
+  roles?: string[];
+  suspended?: boolean;
+  isActive?: boolean;
+  suspendedReason?: string;
   createdAt: string;
 }
 
@@ -195,6 +199,56 @@ export interface FollowRequest {
 }
 
 export type FollowStatus = "NONE" | "PENDING" | "FOLLOWING";
+
+export interface PageResponse<T> {
+  content: T[];
+  page?: number;
+  currentPage?: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
+export interface AdminReport {
+  id: string;
+  contentId: string;
+  contentType: string;
+  reason: string;
+  reporterId: string;
+  status: "OPEN" | "PENDING" | "RESOLVED" | "REJECTED";
+  action?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface AdminAuditLog {
+  id: string;
+  actorId: string;
+  action: string;
+  details?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AdminOverview {
+  stats: {
+    users: number;
+    suspendedUsers: number;
+    posts: number;
+    comments: number;
+    stories: number;
+    videos: number;
+    groups: number;
+    pages: number;
+    openReports: number;
+    resolvedReports: number;
+    unreadNotifications: number;
+  };
+  recentReports: AdminReport[];
+  recentUsers: UserProfile[];
+  recentPosts: Post[];
+}
 
 // Token management
 export const tokenManager = {
@@ -936,6 +990,60 @@ export const moderationApi = {
   
   resolveReport: (reportId: string, action: 'approve' | 'reject' | 'ban') => 
     api.post(`/api/moderation/reports/${reportId}/resolve`, { action }),
+};
+
+export const adminApi = {
+  getOverview: async () => {
+    const response = await api.get<ApiResponse<AdminOverview> | AdminOverview>(`/api/admin/overview?_=${Date.now()}`);
+    return unwrapApiData<AdminOverview>(response, {
+      stats: {
+        users: 0,
+        suspendedUsers: 0,
+        posts: 0,
+        comments: 0,
+        stories: 0,
+        videos: 0,
+        groups: 0,
+        pages: 0,
+        openReports: 0,
+        resolvedReports: 0,
+        unreadNotifications: 0,
+      },
+      recentReports: [],
+      recentUsers: [],
+      recentPosts: [],
+    });
+  },
+  getUsers: async (page = 0, size = 20, query = "") => {
+    const response = await api.get<PageResponse<UserProfile>>(
+      `/api/admin/users?page=${page}&size=${size}&q=${encodeURIComponent(query)}&_=${Date.now()}`
+    );
+    return response;
+  },
+  updateUserRoles: (userId: string, roles: string[]) =>
+    api.put<ApiResponse<{ userId: string; roles: string[] }> | { userId: string; roles: string[] }>(`/api/admin/users/${userId}/roles`, { roles }),
+  suspendUser: (userId: string, reason: string) =>
+    api.post<ApiResponse<{ userId: string; suspended: boolean }> | { userId: string; suspended: boolean }>(`/api/admin/users/${userId}/suspend`, { reason }),
+  unsuspendUser: (userId: string) =>
+    api.delete<ApiResponse<{ userId: string; suspended: boolean }> | { userId: string; suspended: boolean }>(`/api/admin/users/${userId}/suspend`),
+  getReports: async (page = 0, size = 20, status = "ALL") => {
+    const response = await api.get<PageResponse<AdminReport>>(
+      `/api/admin/reports?page=${page}&size=${size}&status=${encodeURIComponent(status)}&_=${Date.now()}`
+    );
+    return response;
+  },
+  resolveReport: (reportId: string, action: "APPROVE" | "REJECT" | "BAN" | "DELETE") =>
+    api.post<ApiResponse<AdminReport> | AdminReport>(`/api/admin/reports/${reportId}/resolve`, { action }),
+  getContent: async (page = 0, size = 20) => {
+    const response = await api.get<PageResponse<Post>>(`/api/admin/content?page=${page}&size=${size}&_=${Date.now()}`);
+    return response;
+  },
+  deletePost: (postId: string) =>
+    api.delete<ApiResponse<{ id: string }> | { id: string }>(`/api/admin/posts/${postId}`),
+  getAudit: async (page = 0, size = 30) => {
+    const response = await api.get<PageResponse<AdminAuditLog>>(`/api/admin/audit?page=${page}&size=${size}&_=${Date.now()}`);
+    return response;
+  },
 };
 
 export default api;

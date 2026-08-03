@@ -53,6 +53,7 @@ export default async function handler(req, res) {
     if (parts[0] === "pages") return pageRoutes(req, res, parts.slice(1));
     if (parts[0] === "recommendations") return recommendationRoutes(req, res);
     if (parts[0] === "chat") return chatRoutes(req, res, parts.slice(1));
+    if (parts[0] === "admin") return adminRoutes(req, res, parts.slice(1));
     if (parts[0] === "moderation") return moderationRoutes(req, res, parts.slice(1));
     if (parts[0] === "search") return searchRoutes(req, res);
     if (parts[0] === "health") return json(res, 200, ok({ status: "up" }));
@@ -113,6 +114,9 @@ async function authRoutes(req, res, parts) {
     const user = await users.findOne({ $or: [{ username: login }, { email: login.toLowerCase() }] });
     if (!user || !verifyPassword(String(body.password || ""), user.passwordHash || user.password)) {
       return json(res, 401, error("Identifiants invalides"));
+    }
+    if (user.suspended || user.isActive === false) {
+      return json(res, 403, error("Compte suspendu. Contactez l'administration."));
     }
     return issueSession(res, refreshTokens, String(user._id), user.username, user.roles || ["USER"]);
   }
@@ -1394,6 +1398,227 @@ async function moderationRoutes(req, res, parts) {
   }
 
   return json(res, 404, error("Endpoint modération introuvable"));
+}
+
+async function adminRoutes(req, res, parts) {
+  const auth = currentAuth(req);
+  const userId = auth?.userId || null;
+  if (!userId) return json(res, 401, error("Non authentifié"));
+  if (!hasAnyRole(auth, ["ADMIN", "MODERATOR"])) return json(res, 403, error("Action interdite"));
+
+  const userDb = await serviceDb("user");
+  const postDb = await serviceDb("post");
+  const moderationDb = await serviceDb("moderation");
+  const authDb = await serviceDb("auth");
+
+  const profiles = userDb.collection(COLLECTIONS.userProfiles);
+  const authUsers = authDb.collection(COLLECTIONS.authUsers);
+  const posts = postDb.collection(COLLECTIONS.posts);
+  const comments = postDb.collection(COLLECTIONS.comments);
+  const stories = postDb.collection(COLLECTIONS.stories);
+  const videos = postDb.collection(COLLECTIONS.videos);
+  const groups = postDb.collection(COLLECTIONS.groups);
+  const pages = postDb.collection(COLLECTIONS.pages);
+  const notifications = postDb.collection(COLLECTIONS.notifications);
+  const reports = moderationDb.collection(COLLECTIONS.reports);
+  const auditLogs = moderationDb.collection(COLLECTIONS.auditLogs);
+
+  if (req.method === "GET" && parts[0] === "overview") {
+    const [
+      usersCount,
+      suspendedUsers,
+      postsCount,
+      commentsCount,
+      storiesCount,
+      videosCount,
+      groupsCount,
+      pagesCount,
+      openReports,
+      resolvedReports,
+      unreadNotifications,
+      recentReports,
+      recentUsers,
+      recentPosts,
+    ] = await Promise.all([
+      profiles.countDocuments({}),
+      profiles.countDocuments({ suspended: true }),
+      posts.countDocuments({}),
+      comments.countDocuments({}),
+      stories.countDocuments({}),
+      videos.countDocuments({}),
+      groups.countDocuments({}),
+      pages.countDocuments({}),
+      reports.countDocuments({ status: { $in: ["OPEN", "PENDING"] } }),
+      reports.countDocuments({ status: { $in: ["RESOLVED", "REJECTED"] } }),
+      notifications.countDocuments({ read: false }),
+      reports.find({}).sort({ createdAt: -1 }).limit(8).toArray(),
+      profiles.find({}).sort({ createdAt: -1 }).limit(8).toArray(),
+      posts.find({}).sort({ createdAt: -1 }).limit(8).toArray(),
+    ]);
+
+    return json(res, 200, ok({
+      stats: {
+        users: usersCount,
+        suspendedUsers,
+        posts: postsCount,
+        comments: commentsCount,
+        stories: storiesCount,
+        videos: videosCount,
+        groups: groupsCount,
+        pages: pagesCount,
+        openReports,
+        resolvedReports,
+        unreadNotifications,
+      },
+      recentReports: recentReports.map(normalizeDoc),
+      recentUsers: recentUsers.map(privateUser),
+      recentPosts: recentPosts.map(normalizeDoc),
+    }));
+  }
+
+  if (req.method === "GET" && parts[0] === "users") {
+    const url = new URL(req.url, "http://localhost");
+    const { page, size } = parsePagination(url);
+    const q = validateSearch(url.searchParams.get("q"));
+    const search = q ? { $regex: escapeRegex(q), $options: "i" } : null;
+    const filter = search
+      ? { $or: [{ username: search }, { email: search }, { fullname: search }] }
+      : {};
+    const total = await profiles.countDocuments(filter);
+    const rows = await profiles.find(filter).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    const ids = rows.map((row) => row._id);
+    const authRows = await authUsers.find({ _id: { $in: ids } }).toArray();
+    const authById = new Map(authRows.map((row) => [String(row._id), row]));
+    return json(res, 200, pageResult(rows.map((profile) => ({
+      ...privateUser(profile),
+      roles: authById.get(String(profile._id))?.roles || ["USER"],
+      suspended: Boolean(profile.suspended || authById.get(String(profile._id))?.suspended),
+      isActive: authById.get(String(profile._id))?.isActive !== false,
+      suspendedReason: profile.suspendedReason || authById.get(String(profile._id))?.suspendedReason || "",
+    })), page, size, total));
+  }
+
+  if (req.method === "PUT" && parts[0] === "users" && parts[2] === "roles") {
+    if (!hasAnyRole(auth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
+    const targetId = validateId(parts[1], "Utilisateur");
+    const body = await readBody(req);
+    const allowedRoles = new Set(["USER", "MODERATOR", "ADMIN"]);
+    const roles = [...new Set(Array.isArray(body.roles) ? body.roles.map((role) => String(role).toUpperCase()) : [])]
+      .filter((role) => allowedRoles.has(role));
+    if (!roles.includes("USER")) roles.unshift("USER");
+    const now = new Date().toISOString();
+    await authUsers.updateOne({ _id: makeId(targetId) }, { $set: { roles, updatedAt: now } });
+    await writeAuditLog(auditLogs, userId, "USER_ROLES_UPDATED", { targetId, roles });
+    return json(res, 200, ok({ userId: targetId, roles }));
+  }
+
+  if (req.method === "POST" && parts[0] === "users" && parts[2] === "suspend") {
+    const targetId = validateId(parts[1], "Utilisateur");
+    if (targetId === userId) return json(res, 400, error("Impossible de suspendre votre propre compte"));
+    const body = await readBody(req);
+    const reason = requireString(body.reason || "Suspension administrative", "Raison", { min: 3, max: 300 });
+    const now = new Date().toISOString();
+    const update = { suspended: true, isActive: false, suspendedReason: reason, suspendedAt: now, updatedAt: now };
+    await Promise.all([
+      profiles.updateOne({ _id: makeId(targetId) }, { $set: update }),
+      authUsers.updateOne({ _id: makeId(targetId) }, { $set: update }),
+      writeAuditLog(auditLogs, userId, "USER_SUSPENDED", { targetId, reason }),
+    ]);
+    await createNotification(postDb, targetId, {
+      type: "moderation",
+      title: "Compte suspendu",
+      body: reason,
+      actorId: userId,
+      entityId: targetId,
+    });
+    return json(res, 200, ok({ userId: targetId, suspended: true }));
+  }
+
+  if (req.method === "DELETE" && parts[0] === "users" && parts[2] === "suspend") {
+    const targetId = validateId(parts[1], "Utilisateur");
+    const now = new Date().toISOString();
+    await Promise.all([
+      profiles.updateOne({ _id: makeId(targetId) }, { $set: { suspended: false, isActive: true, updatedAt: now }, $unset: { suspendedReason: "", suspendedAt: "" } }),
+      authUsers.updateOne({ _id: makeId(targetId) }, { $set: { suspended: false, isActive: true, updatedAt: now }, $unset: { suspendedReason: "", suspendedAt: "" } }),
+      writeAuditLog(auditLogs, userId, "USER_UNSUSPENDED", { targetId }),
+    ]);
+    return json(res, 200, ok({ userId: targetId, suspended: false }));
+  }
+
+  if (req.method === "GET" && parts[0] === "reports") {
+    const url = new URL(req.url, "http://localhost");
+    const { page, size } = parsePagination(url);
+    const status = validateSearch(url.searchParams.get("status")).toUpperCase();
+    const filter = status && status !== "ALL" ? { status } : {};
+    const total = await reports.countDocuments(filter);
+    const rows = await reports.find(filter).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    return json(res, 200, pageResult(rows.map(normalizeDoc), page, size, total));
+  }
+
+  if (req.method === "POST" && parts[0] === "reports" && parts[2] === "resolve") {
+    const reportId = validateId(parts[1], "Signalement");
+    const body = await readBody(req);
+    const action = requireString(body.action || "REJECT", "Action", { min: 3, max: 20 }).toUpperCase();
+    if (!["APPROVE", "REJECT", "BAN", "DELETE"].includes(action)) return json(res, 400, error("Action invalide"));
+    const now = new Date().toISOString();
+    const report = await reports.findOne({ _id: makeId(reportId) });
+    if (!report) return json(res, 404, error("Signalement introuvable"));
+    if (action === "DELETE" && String(report.contentType || "").toUpperCase() === "POST") {
+      await deletePostCascade(posts, comments, report.contentId);
+    }
+    const update = {
+      status: action === "REJECT" ? "REJECTED" : "RESOLVED",
+      action,
+      resolvedBy: userId,
+      resolvedAt: now,
+      updatedAt: now,
+    };
+    await reports.updateOne({ _id: makeId(reportId) }, { $set: update, $push: { history: { action, actorId: userId, at: now } } });
+    await writeAuditLog(auditLogs, userId, `REPORT_${action}`, { reportId, contentType: report.contentType, contentId: report.contentId });
+    const updated = await reports.findOne({ _id: makeId(reportId) });
+    return json(res, 200, ok(normalizeDoc(updated)));
+  }
+
+  if (req.method === "GET" && parts[0] === "content") {
+    const url = new URL(req.url, "http://localhost");
+    const { page, size } = parsePagination(url);
+    const rows = await posts.find({}).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    const total = await posts.countDocuments({});
+    return json(res, 200, pageResult(rows.map(normalizeDoc), page, size, total));
+  }
+
+  if (req.method === "DELETE" && parts[0] === "posts" && parts[1]) {
+    const postId = validateId(parts[1], "Publication");
+    await deletePostCascade(posts, comments, postId);
+    await writeAuditLog(auditLogs, userId, "POST_DELETED", { postId });
+    return json(res, 200, ok({ id: postId }, "Publication supprimée"));
+  }
+
+  if (req.method === "GET" && parts[0] === "audit") {
+    const url = new URL(req.url, "http://localhost");
+    const { page, size } = parsePagination(url);
+    const total = await auditLogs.countDocuments({});
+    const rows = await auditLogs.find({}).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    return json(res, 200, pageResult(rows.map(normalizeDoc), page, size, total));
+  }
+
+  return json(res, 404, error("Endpoint admin introuvable"));
+}
+
+async function writeAuditLog(auditLogs, actorId, action, details = {}) {
+  await auditLogs.insertOne({
+    actorId,
+    action,
+    details,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+async function deletePostCascade(posts, comments, postId) {
+  await Promise.all([
+    posts.deleteOne({ _id: makeId(postId) }),
+    comments.deleteMany({ postId }),
+  ]);
 }
 
 function hasAnyRole(auth, roles) {

@@ -104,6 +104,11 @@ try {
     { key: { contentType: 1, contentId: 1 }, name: "reports_content" },
     { key: { reporterId: 1, createdAt: -1 }, name: "reports_reporter_created" },
   ]);
+  await moderationDb.collection("audit_logs").createIndexes([
+    { key: { createdAt: -1 }, name: "audit_created" },
+    { key: { actorId: 1, createdAt: -1 }, name: "audit_actor_created" },
+    { key: { action: 1, createdAt: -1 }, name: "audit_action_created" },
+  ]);
 
   console.log("MongoDB indexes created");
 } finally {

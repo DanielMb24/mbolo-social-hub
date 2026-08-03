@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, useEffect } from "react";
 import {
   MessageCircle, Users, Video, Home, User, Search, Bell,
-  Menu, X, LogOut, WifiOff, Compass, Sparkles
+  Menu, X, LogOut, WifiOff, Compass, Sparkles, ShieldCheck
 } from "lucide-react";
 import AuthPage from "@/components/mbolo/AuthPage";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -17,12 +17,13 @@ const ProfilePage = lazy(() => import("@/components/mbolo/ProfilePage"));
 const PeoplePage = lazy(() => import("@/components/mbolo/PeoplePage"));
 const ExplorePage = lazy(() => import("@/components/mbolo/ExplorePage"));
 const SocialHubPage = lazy(() => import("@/components/mbolo/SocialHubPage"));
+const AdminPage = lazy(() => import("@/components/mbolo/AdminPage"));
 const StoryManager = lazy(() => import("@/components/mbolo/StoryManager"));
 const TrendingSidebar = lazy(() => import("@/components/mbolo/TrendingSidebar"));
 const NotificationPanel = lazy(() => import("@/components/mbolo/NotificationPanel"));
 const GlobalSearch = lazy(() => import("@/components/mbolo/GlobalSearch"));
 
-type Tab = "feed" | "chat" | "videos" | "people" | "profile" | "explore" | "stories" | "communities";
+type Tab = "feed" | "chat" | "videos" | "people" | "profile" | "explore" | "stories" | "communities" | "admin";
 
 const NAV_ITEMS: { id: Tab; icon: React.ElementType; label: string }[] = [
   { id: "feed", icon: Home, label: "Accueil" },
@@ -34,6 +35,19 @@ const NAV_ITEMS: { id: Tab; icon: React.ElementType; label: string }[] = [
   { id: "people", icon: Users, label: "Amis" },
   { id: "profile", icon: User, label: "Profil" },
 ];
+
+const getRolesFromToken = () => {
+  const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+  if (!token) return [];
+  try {
+    const payload = token.split(".")[1] || "";
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const parsed = JSON.parse(window.atob(normalized));
+    return Array.isArray(parsed.roles) ? parsed.roles.map((role: string) => role.toUpperCase()) : [];
+  } catch {
+    return [];
+  }
+};
 
 const LoadingPanel = () => (
   <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
@@ -54,6 +68,9 @@ const Index = () => {
   const isMobile = useIsMobile();
   const isOnline = useOnlineStatus();
   const navigate = useNavigate();
+  const roles = getRolesFromToken();
+  const canAccessAdmin = roles.includes("ADMIN") || roles.includes("MODERATOR");
+  const navItems = canAccessAdmin ? [...NAV_ITEMS, { id: "admin" as Tab, icon: ShieldCheck, label: "Admin" }] : NAV_ITEMS;
 
   useEffect(() => {
     if (isAuthenticated) loadCurrentUser();
@@ -73,9 +90,18 @@ const Index = () => {
     };
 
     refreshUnreadCount();
-    const interval = window.setInterval(refreshUnreadCount, 45_000);
+    const handleVisibility = () => {
+      if (!document.hidden) refreshUnreadCount();
+    };
+    window.addEventListener("focus", refreshUnreadCount);
+    window.addEventListener("mbolo:notifications-changed", refreshUnreadCount);
+    document.addEventListener("visibilitychange", handleVisibility);
+    const interval = window.setInterval(refreshUnreadCount, 10_000);
     return () => {
       active = false;
+      window.removeEventListener("focus", refreshUnreadCount);
+      window.removeEventListener("mbolo:notifications-changed", refreshUnreadCount);
+      document.removeEventListener("visibilitychange", handleVisibility);
       window.clearInterval(interval);
     };
   }, [isAuthenticated]);
@@ -137,7 +163,7 @@ const Index = () => {
   };
 
   // Header nav items for Facebook-style top bar
-  const headerNavItems = NAV_ITEMS.filter(n => ['feed', 'explore', 'communities', 'stories', 'videos', 'people', 'chat'].includes(n.id));
+  const headerNavItems = navItems.filter(n => ['feed', 'explore', 'communities', 'stories', 'videos', 'people', 'chat', 'admin'].includes(n.id));
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -274,6 +300,7 @@ const Index = () => {
                 { icon: Compass, label: 'Explorer', tab: 'explore' as Tab },
                 { icon: Users, label: 'Communautés', tab: 'communities' as Tab },
                 { icon: MessageCircle, label: 'Messenger', tab: 'chat' as Tab },
+                ...(canAccessAdmin ? [{ icon: ShieldCheck, label: 'Admin', tab: 'admin' as Tab }] : []),
               ].map(item => (
                 <button
                   key={item.label}
@@ -305,6 +332,7 @@ const Index = () => {
             {activeTab === "chat" && <ChatPage />}
             {activeTab === "videos" && <VideoPage />}
             {activeTab === "profile" && <ProfilePage onLogout={handleLogout} />}
+            {activeTab === "admin" && <AdminPage />}
           </Suspense>
         </main>
 
@@ -359,7 +387,7 @@ const Index = () => {
             </div>
 
             <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-              {NAV_ITEMS.map((item) => {
+              {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
                 return (

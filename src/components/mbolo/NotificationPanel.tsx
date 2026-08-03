@@ -48,21 +48,25 @@ const NotificationPanel = ({ onClose, onUnreadChange }: NotificationPanelProps) 
   const panelRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+  const broadcastChange = () => window.dispatchEvent(new Event("mbolo:notifications-changed"));
 
   const markAllRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     onUnreadChange?.(0);
     await notificationApi.markAllRead().catch(() => undefined);
+    broadcastChange();
   };
 
   const markRead = async (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     await notificationApi.markRead(id).catch(() => undefined);
+    broadcastChange();
   };
 
   const dismiss = async (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
     await notificationApi.dismiss(id).catch(() => undefined);
+    broadcastChange();
   };
 
   useEffect(() => {
