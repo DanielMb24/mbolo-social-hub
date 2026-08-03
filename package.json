@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "db:indexes": "node scripts/create-mongodb-indexes.mjs",
+    "db:health": "node scripts/db-health.mjs",
+    "db:health:fix": "node scripts/db-health.mjs --fix",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

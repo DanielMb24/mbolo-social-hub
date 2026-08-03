@@ -21,7 +21,7 @@ try {
     { key: { email: 1 }, unique: true, name: "auth_email_unique" },
   ]);
   await authDb.collection("refresh_tokens").createIndexes([
-    { key: { jti: 1 }, unique: true, name: "refresh_jti_unique" },
+    { key: { jti: 1 }, unique: true, name: "refresh_jti_unique", partialFilterExpression: { jti: { $type: "string" } } },
     { key: { userId: 1, revokedAt: 1 }, name: "refresh_user_revoked" },
     { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: "refresh_expiry_ttl" },
   ]);
@@ -37,8 +37,8 @@ try {
   ]);
 
   const userDb = client.db(dbName("user"));
-  await userDb.collection("user_profiles").createIndexes([
-    { key: { username: 1 }, unique: true, name: "profile_username_unique" },
+  await userDb.collection("users_profile").createIndexes([
+    { key: { username: 1 }, name: "profile_username_lookup" },
     { key: { profileVisibility: 1, createdAt: -1 }, name: "profile_visibility_created" },
     { key: { blockedUsers: 1 }, name: "profile_blocked_users" },
     { key: { username: "text", fullname: "text", bio: "text" }, name: "profile_text_search" },
@@ -118,6 +118,9 @@ try {
     { key: { createdAt: -1 }, name: "audit_created" },
     { key: { actorId: 1, createdAt: -1 }, name: "audit_actor_created" },
     { key: { action: 1, createdAt: -1 }, name: "audit_action_created" },
+  ]);
+  await moderationDb.collection("platform_settings").createIndexes([
+    { key: { updatedAt: -1 }, name: "platform_settings_updated" },
   ]);
 
   console.log("MongoDB indexes created");
