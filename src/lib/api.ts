@@ -71,14 +71,18 @@ export interface UserProfile {
   roles?: string[];
   suspended?: boolean;
   isActive?: boolean;
+  isVerified?: boolean;
   suspendedReason?: string;
   createdAt: string;
 }
 
 export interface Post {
   id: string;
-  authorId: string;
-  content: string;
+  authorId?: string;
+  userId?: string;
+  content?: string;
+  title?: string;
+  description?: string;
   targetType?: "GROUP" | "PAGE";
   targetId?: string;
   targetName?: string;
@@ -245,6 +249,7 @@ export interface AdminOverview {
     openReports: number;
     resolvedReports: number;
     unreadNotifications: number;
+    activeToday: number;
   };
   recentReports: AdminReport[];
   recentUsers: UserProfile[];
@@ -271,6 +276,12 @@ export interface AdminUserDetail {
   };
   recentPosts: Post[];
   recentReports: AdminReport[];
+}
+
+export type AdminContentType = "POST" | "COMMENT" | "STORY" | "VIDEO";
+
+export interface AdminBroadcastResult {
+  sent: number;
 }
 
 // Token management
@@ -1031,6 +1042,7 @@ export const adminApi = {
         openReports: 0,
         resolvedReports: 0,
         unreadNotifications: 0,
+        activeToday: 0,
       },
       recentReports: [],
       recentUsers: [],
@@ -1053,6 +1065,10 @@ export const adminApi = {
     api.post<ApiResponse<{ userId: string; suspended: boolean }> | { userId: string; suspended: boolean }>(`/api/admin/users/${userId}/suspend`, { reason }),
   unsuspendUser: (userId: string) =>
     api.delete<ApiResponse<{ userId: string; suspended: boolean }> | { userId: string; suspended: boolean }>(`/api/admin/users/${userId}/suspend`),
+  verifyUser: (userId: string) =>
+    api.post<ApiResponse<{ userId: string; isVerified: boolean }> | { userId: string; isVerified: boolean }>(`/api/admin/users/${userId}/verify`),
+  unverifyUser: (userId: string) =>
+    api.delete<ApiResponse<{ userId: string; isVerified: boolean }> | { userId: string; isVerified: boolean }>(`/api/admin/users/${userId}/verify`),
   getReports: async (page = 0, size = 20, status = "ALL") => {
     const response = await api.get<PageResponse<AdminReport>>(
       `/api/admin/reports?page=${page}&size=${size}&status=${encodeURIComponent(status)}&_=${Date.now()}`
@@ -1061,12 +1077,20 @@ export const adminApi = {
   },
   resolveReport: (reportId: string, action: "APPROVE" | "REJECT" | "BAN" | "DELETE") =>
     api.post<ApiResponse<AdminReport> | AdminReport>(`/api/admin/reports/${reportId}/resolve`, { action }),
-  getContent: async (page = 0, size = 20) => {
-    const response = await api.get<PageResponse<Post>>(`/api/admin/content?page=${page}&size=${size}&_=${Date.now()}`);
+  getContent: async (page = 0, size = 20, type: AdminContentType = "POST", query = "") => {
+    const response = await api.get<PageResponse<Post>>(
+      `/api/admin/content?page=${page}&size=${size}&type=${encodeURIComponent(type)}&q=${encodeURIComponent(query)}&_=${Date.now()}`
+    );
     return response;
   },
+  deleteContent: (type: AdminContentType, contentId: string) =>
+    api.delete<ApiResponse<{ id: string; type: AdminContentType }> | { id: string; type: AdminContentType }>(`/api/admin/content/${type}/${contentId}`),
   deletePost: (postId: string) =>
     api.delete<ApiResponse<{ id: string }> | { id: string }>(`/api/admin/posts/${postId}`),
+  broadcastNotification: async (data: { title: string; body: string; target?: "ALL" | "ACTIVE" }) => {
+    const response = await api.post<ApiResponse<AdminBroadcastResult> | AdminBroadcastResult>('/api/admin/notifications/broadcast', data);
+    return unwrapApiData<AdminBroadcastResult>(response, { sent: 0 });
+  },
   getAudit: async (page = 0, size = 30) => {
     const response = await api.get<PageResponse<AdminAuditLog>>(`/api/admin/audit?page=${page}&size=${size}&_=${Date.now()}`);
     return response;

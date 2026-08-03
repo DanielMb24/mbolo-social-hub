@@ -3,8 +3,12 @@ import type { ElementType, ReactNode } from "react";
 import {
   AlertTriangle,
   Ban,
+  BadgeCheck,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   FileText,
+  Mail,
   RefreshCw,
   Search,
   Shield,
@@ -19,6 +23,7 @@ import {
   authApi,
   tokenManager,
   type AdminAuditLog,
+  type AdminContentType,
   type AdminOverview,
   type AdminReport,
   type AdminUserDetail,
@@ -27,7 +32,7 @@ import {
   type UserProfile,
 } from "@/lib/api";
 
-type AdminTab = "overview" | "reports" | "users" | "content" | "audit";
+type AdminTab = "overview" | "reports" | "users" | "content" | "broadcast" | "audit";
 
 const emptyPage = <T,>(): PageResponse<T> => ({
   content: [],
@@ -78,6 +83,11 @@ const AdminPage = () => {
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUserDetail | null>(null);
   const [query, setQuery] = useState("");
   const [reportStatus, setReportStatus] = useState("ALL");
+  const [contentType, setContentType] = useState<AdminContentType>("POST");
+  const [contentQuery, setContentQuery] = useState("");
+  const [broadcastTitle, setBroadcastTitle] = useState("");
+  const [broadcastBody, setBroadcastBody] = useState("");
+  const [broadcastTarget, setBroadcastTarget] = useState<"ALL" | "ACTIVE">("ACTIVE");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -95,7 +105,7 @@ const AdminPage = () => {
         adminApi.getOverview(),
         adminApi.getReports(0, 20, reportStatus),
         adminApi.getUsers(0, 20, query),
-        adminApi.getContent(0, 20),
+        adminApi.getContent(0, 20, contentType, contentQuery),
         adminApi.getAudit(0, 30),
       ]);
       setEffectiveRoles((me.roles || []).map((role) => role.toUpperCase()));
@@ -116,7 +126,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     loadAll();
-  }, [reportStatus]);
+  }, [reportStatus, contentType]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -126,6 +136,15 @@ const AdminPage = () => {
     }, 350);
     return () => window.clearTimeout(timer);
   }, [query, activeTab]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (activeTab === "content") {
+        adminApi.getContent(0, 20, contentType, contentQuery).then(setContent).catch(() => undefined);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [contentQuery, contentType, activeTab]);
 
   const resolveReport = async (report: AdminReport, action: "APPROVE" | "REJECT" | "BAN" | "DELETE") => {
     setBusyId(report.id);
@@ -197,6 +216,27 @@ const AdminPage = () => {
     }
   };
 
+  const toggleVerified = async (user: UserProfile) => {
+    if (!canAdmin) return toast.error("Action réservée aux admins");
+    setBusyId(user.id);
+    const nextVerified = !user.isVerified;
+    setUsers((page) => ({
+      ...page,
+      content: page.content.map((item) => (item.id === user.id ? { ...item, isVerified: nextVerified } : item)),
+    }));
+    try {
+      if (nextVerified) await adminApi.verifyUser(user.id);
+      else await adminApi.unverifyUser(user.id);
+      toast.success(nextVerified ? "Compte vérifié" : "Vérification retirée");
+      loadAll();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Vérification impossible");
+      loadAll();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const showUserInfo = async (user: UserProfile) => {
     setBusyId(user.id);
     try {
@@ -209,20 +249,58 @@ const AdminPage = () => {
     }
   };
 
-  const deletePost = async (postId: string) => {
-    if (!window.confirm("Supprimer cette publication ?")) return;
-    setBusyId(postId);
+  const deleteContent = async (contentId: string) => {
+    if (!window.confirm("Supprimer ce contenu ?")) return;
+    setBusyId(contentId);
     const previous = content;
-    setContent((page) => ({ ...page, content: page.content.filter((post) => post.id !== postId) }));
+    setContent((page) => ({ ...page, content: page.content.filter((post) => post.id !== contentId) }));
     try {
-      await adminApi.deletePost(postId);
-      toast.success("Publication supprimée");
+      await adminApi.deleteContent(contentType, contentId);
+      toast.success("Contenu supprimé");
       loadAll();
     } catch (error) {
       setContent(previous);
       toast.error(error instanceof Error ? error.message : "Suppression impossible");
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const sendBroadcast = async () => {
+    if (!canAdmin) return toast.error("Action réservée aux admins");
+    if (broadcastTitle.trim().length < 3 || broadcastBody.trim().length < 3) {
+      toast.error("Titre et message requis");
+      return;
+    }
+    setBusyId("broadcast");
+    try {
+      const result = await adminApi.broadcastNotification({
+        title: broadcastTitle.trim(),
+        body: broadcastBody.trim(),
+        target: broadcastTarget,
+      });
+      toast.success(`Notification envoyée à ${result.sent} utilisateur(s)`);
+      setBroadcastTitle("");
+      setBroadcastBody("");
+      loadAll();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Envoi impossible");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const loadPage = async (kind: AdminTab, page: number) => {
+    setLoading(true);
+    try {
+      if (kind === "reports") setReports(await adminApi.getReports(page, reports.size, reportStatus));
+      if (kind === "users") setUsers(await adminApi.getUsers(page, users.size, query));
+      if (kind === "content") setContent(await adminApi.getContent(page, content.size, contentType, contentQuery));
+      if (kind === "audit") setAudit(await adminApi.getAudit(page, audit.size));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Chargement impossible");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -267,6 +345,7 @@ const AdminPage = () => {
             ["reports", "Signalements", AlertTriangle],
             ["users", "Utilisateurs", Users],
             ["content", "Contenus", FileText],
+            ["broadcast", "Diffusion", Mail],
             ["audit", "Audit", UserCog],
           ].map(([id, label, Icon]) => (
             <button
@@ -296,7 +375,7 @@ const AdminPage = () => {
                   <StatTile label="Suspendus" value={overview.stats.suspendedUsers} icon={Ban} />
                   <StatTile label="Publications" value={overview.stats.posts} icon={FileText} />
                   <StatTile label="Signalements ouverts" value={overview.stats.openReports} icon={AlertTriangle} />
-                  <StatTile label="Notifications non lues" value={overview.stats.unreadNotifications} icon={CheckCircle2} />
+                  <StatTile label="Actifs 24h" value={overview.stats.activeToday || 0} icon={CheckCircle2} />
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <RecentList title="Derniers signalements" rows={overview.recentReports.map((r) => `${r.contentType} · ${r.status} · ${r.reason}`)} />
@@ -336,6 +415,7 @@ const AdminPage = () => {
                   ))}
                   {!reports.content.length && <EmptyLine text="Aucun signalement trouvé" />}
                 </div>
+                <Pager page={reports} onPage={(page) => loadPage("reports", page)} />
               </section>
             )}
 
@@ -352,6 +432,7 @@ const AdminPage = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">@{user.username}</span>
                           {(user.roles || ["USER"]).map((role) => <span key={role} className="rounded-full bg-muted px-2 py-0.5 text-xs">{role}</span>)}
+                          {user.isVerified && <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700"><BadgeCheck className="h-3 w-3" /> vérifié</span>}
                           {user.suspended && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">SUSPENDU</span>}
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">{user.email || "email absent"} · {user.profileVisibility || "PUBLIC"}</p>
@@ -362,6 +443,9 @@ const AdminPage = () => {
                         <ActionButton disabled={busyId === user.id || !canAdmin} onClick={() => setRole(user, "USER")}>User</ActionButton>
                         <ActionButton disabled={busyId === user.id || !canAdmin} onClick={() => setRole(user, "MODERATOR")}>Modo</ActionButton>
                         <ActionButton disabled={busyId === user.id || !canAdmin} onClick={() => setRole(user, "ADMIN")}>Admin</ActionButton>
+                        <ActionButton disabled={busyId === user.id || !canAdmin} onClick={() => toggleVerified(user)}>
+                          {user.isVerified ? "Dé-vérifier" : "Vérifier"}
+                        </ActionButton>
                         <ActionButton danger={Boolean(!user.suspended)} disabled={busyId === user.id} onClick={() => suspendUser(user)}>
                           {user.suspended ? "Réactiver" : "Suspendre"}
                         </ActionButton>
@@ -370,6 +454,7 @@ const AdminPage = () => {
                   ))}
                   {!users.content.length && <EmptyLine text="Aucun utilisateur trouvé" />}
                 </div>
+                <Pager page={users} onPage={(page) => loadPage("users", page)} />
                 {selectedUserDetail && (
                   <section className="rounded-lg border bg-background">
                     <div className="flex items-center justify-between border-b px-4 py-3">
@@ -392,7 +477,7 @@ const AdminPage = () => {
                         <p className="mt-2 text-sm">Rôles: {(selectedUserDetail.auth?.roles || selectedUserDetail.profile.roles || ["USER"]).join(", ")}</p>
                         <p className="text-sm">Actif: {selectedUserDetail.auth?.isActive ? "oui" : "non"}</p>
                         <p className="text-sm">Suspendu: {selectedUserDetail.profile.suspended ? "oui" : "non"}</p>
-                        <p className="text-sm">Vérifié: {selectedUserDetail.auth?.isVerified ? "oui" : "non"}</p>
+                        <p className="text-sm">Vérifié: {selectedUserDetail.auth?.isVerified || selectedUserDetail.profile.isVerified ? "oui" : "non"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Activité</p>
@@ -412,42 +497,81 @@ const AdminPage = () => {
             )}
 
             {activeTab === "content" && (
-              <div className="overflow-hidden rounded-lg border bg-background">
-                {content.content.map((post) => (
-                  <div key={post.id} className="grid gap-3 border-b p-4 last:border-b-0 lg:grid-cols-[1fr_auto]">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">Post</span>
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{post.visibility || "PUBLIC"}</span>
-                        <span className="text-xs text-muted-foreground">{new Date(post.createdAt).toLocaleString()}</span>
-                      </div>
-                      <p className="mt-2 line-clamp-2 text-sm">{post.content || "Publication média"}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Auteur: {post.authorId} · {post.commentsCount || 0} commentaires</p>
-                    </div>
-                    <button disabled={busyId === post.id} onClick={() => deletePost(post.id)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 px-3 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">
-                      <Trash2 className="h-4 w-4" />
-                      Supprimer
-                    </button>
+              <section className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <select value={contentType} onChange={(event) => setContentType(event.target.value as AdminContentType)} className="rounded-lg border bg-background px-3 py-2 text-sm">
+                    <option value="POST">Posts</option>
+                    <option value="COMMENT">Commentaires</option>
+                    <option value="STORY">Stories</option>
+                    <option value="VIDEO">Vidéos</option>
+                  </select>
+                  <div className="relative min-w-[240px]">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <input value={contentQuery} onChange={(event) => setContentQuery(event.target.value)} placeholder="Chercher contenu ou auteur" className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-sm" />
                   </div>
-                ))}
-                {!content.content.length && <EmptyLine text="Aucun contenu récent" />}
-              </div>
+                </div>
+                <div className="overflow-hidden rounded-lg border bg-background">
+                  {content.content.map((post) => (
+                    <div key={post.id} className="grid gap-3 border-b p-4 last:border-b-0 lg:grid-cols-[1fr_auto]">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">{contentType}</span>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{post.visibility || "PUBLIC"}</span>
+                          <span className="text-xs text-muted-foreground">{post.createdAt ? new Date(post.createdAt).toLocaleString() : "date inconnue"}</span>
+                        </div>
+                        <p className="mt-2 line-clamp-2 text-sm">{post.content || post.title || post.description || "Contenu média"}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Auteur: {post.authorId || post.userId || "inconnu"} · ID: {post.id}</p>
+                      </div>
+                      <button disabled={busyId === post.id} onClick={() => deleteContent(post.id)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 px-3 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">
+                        <Trash2 className="h-4 w-4" />
+                        Supprimer
+                      </button>
+                    </div>
+                  ))}
+                  {!content.content.length && <EmptyLine text="Aucun contenu récent" />}
+                </div>
+                <Pager page={content} onPage={(page) => loadPage("content", page)} />
+              </section>
+            )}
+
+            {activeTab === "broadcast" && (
+              <section className="rounded-lg border bg-background">
+                <div className="border-b px-4 py-3">
+                  <h2 className="text-sm font-semibold">Notification globale</h2>
+                  <p className="text-xs text-muted-foreground">Envoie une notification in-app et email selon la configuration SMTP.</p>
+                </div>
+                <div className="grid gap-3 p-4">
+                  <select value={broadcastTarget} onChange={(event) => setBroadcastTarget(event.target.value as "ALL" | "ACTIVE")} className="max-w-xs rounded-lg border bg-background px-3 py-2 text-sm">
+                    <option value="ACTIVE">Utilisateurs actifs</option>
+                    <option value="ALL">Tous les utilisateurs</option>
+                  </select>
+                  <input value={broadcastTitle} onChange={(event) => setBroadcastTitle(event.target.value)} placeholder="Titre" className="rounded-lg border bg-background px-3 py-2 text-sm" />
+                  <textarea value={broadcastBody} onChange={(event) => setBroadcastBody(event.target.value)} placeholder="Message" rows={5} className="rounded-lg border bg-background px-3 py-2 text-sm" />
+                  <button disabled={busyId === "broadcast" || !canAdmin} onClick={sendBroadcast} className="inline-flex h-10 w-fit items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">
+                    <Mail className="h-4 w-4" />
+                    Envoyer
+                  </button>
+                </div>
+              </section>
             )}
 
             {activeTab === "audit" && (
-              <div className="overflow-hidden rounded-lg border bg-background">
-                {audit.content.map((entry) => (
-                  <div key={entry.id} className="border-b p-4 last:border-b-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{entry.action}</span>
-                      <span className="text-xs text-muted-foreground">{new Date(entry.createdAt).toLocaleString()}</span>
+              <section className="space-y-3">
+                <div className="overflow-hidden rounded-lg border bg-background">
+                  {audit.content.map((entry) => (
+                    <div key={entry.id} className="border-b p-4 last:border-b-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{entry.action}</span>
+                        <span className="text-xs text-muted-foreground">{new Date(entry.createdAt).toLocaleString()}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">Acteur: {entry.actorId}</p>
+                      {entry.details && <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 text-xs">{JSON.stringify(entry.details, null, 2)}</pre>}
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">Acteur: {entry.actorId}</p>
-                    {entry.details && <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 text-xs">{JSON.stringify(entry.details, null, 2)}</pre>}
-                  </div>
-                ))}
-                {!audit.content.length && <EmptyLine text="Aucune action auditée" />}
-              </div>
+                  ))}
+                  {!audit.content.length && <EmptyLine text="Aucune action auditée" />}
+                </div>
+                <Pager page={audit} onPage={(page) => loadPage("audit", page)} />
+              </section>
             )}
           </>
         )}
@@ -471,6 +595,38 @@ const ActionButton = ({ children, disabled, danger, onClick }: { children: React
 const EmptyLine = ({ text }: { text: string }) => (
   <div className="p-6 text-center text-sm text-muted-foreground">{text}</div>
 );
+
+const Pager = <T,>({ page, onPage }: { page: PageResponse<T>; onPage: (page: number) => void }) => {
+  const current = page.currentPage ?? page.page ?? 0;
+  const totalPages = page.totalPages || 0;
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-sm">
+      <span className="text-muted-foreground">
+        Page {current + 1} / {totalPages} · {page.totalElements} élément(s)
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          disabled={current <= 0}
+          onClick={() => onPage(current - 1)}
+          className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 disabled:opacity-50"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Précédent
+        </button>
+        <button
+          disabled={current + 1 >= totalPages}
+          onClick={() => onPage(current + 1)}
+          className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 disabled:opacity-50"
+        >
+          Suivant
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const RecentList = ({ title, rows }: { title: string; rows: string[] }) => (
   <section className="rounded-lg border bg-background">

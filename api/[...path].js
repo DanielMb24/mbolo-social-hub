@@ -1448,6 +1448,7 @@ async function adminRoutes(req, res, parts) {
       openReports,
       resolvedReports,
       unreadNotifications,
+      activeToday,
       recentReports,
       recentUsers,
       recentPosts,
@@ -1463,6 +1464,7 @@ async function adminRoutes(req, res, parts) {
       reports.countDocuments({ status: { $in: ["OPEN", "PENDING"] } }),
       reports.countDocuments({ status: { $in: ["RESOLVED", "REJECTED"] } }),
       notifications.countDocuments({ read: false }),
+      profiles.countDocuments({ updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() } }),
       reports.find({}).sort({ createdAt: -1 }).limit(8).toArray(),
       profiles.find({}).sort({ createdAt: -1 }).limit(8).toArray(),
       posts.find({}).sort({ createdAt: -1 }).limit(8).toArray(),
@@ -1481,6 +1483,7 @@ async function adminRoutes(req, res, parts) {
         openReports,
         resolvedReports,
         unreadNotifications,
+        activeToday,
       },
       recentReports: recentReports.map(normalizeDoc),
       recentUsers: recentUsers.map(privateUser),
@@ -1506,6 +1509,7 @@ async function adminRoutes(req, res, parts) {
       roles: authById.get(String(profile._id))?.roles || ["USER"],
       suspended: Boolean(profile.suspended || authById.get(String(profile._id))?.suspended),
       isActive: authById.get(String(profile._id))?.isActive !== false,
+      isVerified: Boolean(profile.isVerified || authById.get(String(profile._id))?.isVerified),
       suspendedReason: profile.suspendedReason || authById.get(String(profile._id))?.suspendedReason || "",
     })), page, size, total));
   }
@@ -1528,6 +1532,7 @@ async function adminRoutes(req, res, parts) {
         roles: authUser?.roles || ["USER"],
         suspended: Boolean(profile.suspended || authUser?.suspended),
         isActive: authUser?.isActive !== false,
+        isVerified: Boolean(profile.isVerified || authUser?.isVerified),
         suspendedReason: profile.suspendedReason || authUser?.suspendedReason || "",
       },
       auth: authUser ? {
@@ -1594,6 +1599,30 @@ async function adminRoutes(req, res, parts) {
     return json(res, 200, ok({ userId: targetId, suspended: false }));
   }
 
+  if (req.method === "POST" && parts[0] === "users" && parts[2] === "verify") {
+    if (!hasAnyRole(effectiveAuth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
+    const targetId = validateId(parts[1], "Utilisateur");
+    const now = new Date().toISOString();
+    await Promise.all([
+      authUsers.updateOne({ _id: makeId(targetId) }, { $set: { isVerified: true, verifiedAt: now, updatedAt: now } }),
+      profiles.updateOne({ _id: makeId(targetId) }, { $set: { isVerified: true, verifiedAt: now, updatedAt: now } }),
+      writeAuditLog(auditLogs, userId, "USER_VERIFIED", { targetId }),
+    ]);
+    return json(res, 200, ok({ userId: targetId, isVerified: true }));
+  }
+
+  if (req.method === "DELETE" && parts[0] === "users" && parts[2] === "verify") {
+    if (!hasAnyRole(effectiveAuth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
+    const targetId = validateId(parts[1], "Utilisateur");
+    const now = new Date().toISOString();
+    await Promise.all([
+      authUsers.updateOne({ _id: makeId(targetId) }, { $set: { isVerified: false, updatedAt: now }, $unset: { verifiedAt: "" } }),
+      profiles.updateOne({ _id: makeId(targetId) }, { $set: { isVerified: false, updatedAt: now }, $unset: { verifiedAt: "" } }),
+      writeAuditLog(auditLogs, userId, "USER_UNVERIFIED", { targetId }),
+    ]);
+    return json(res, 200, ok({ userId: targetId, isVerified: false }));
+  }
+
   if (req.method === "GET" && parts[0] === "reports") {
     const url = new URL(req.url, "http://localhost");
     const { page, size } = parsePagination(url);
@@ -1631,16 +1660,59 @@ async function adminRoutes(req, res, parts) {
   if (req.method === "GET" && parts[0] === "content") {
     const url = new URL(req.url, "http://localhost");
     const { page, size } = parsePagination(url);
-    const rows = await posts.find({}).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
-    const total = await posts.countDocuments({});
+    const type = validateSearch(url.searchParams.get("type")).toUpperCase() || "POST";
+    const q = validateSearch(url.searchParams.get("q"));
+    const collection = contentCollectionForType(type, { posts, comments, stories, videos });
+    if (!collection) return json(res, 400, error("Type de contenu invalide"));
+    const search = q ? { $regex: escapeRegex(q), $options: "i" } : null;
+    const filter = search
+      ? type === "COMMENT"
+        ? { content: search }
+        : type === "VIDEO"
+          ? { $or: [{ title: search }, { description: search }, { userId: q }] }
+          : { $or: [{ content: search }, { authorId: q }, { userId: q }] }
+      : {};
+    const rows = await collection.find(filter).sort({ createdAt: -1 }).skip(page * size).limit(size).toArray();
+    const total = await collection.countDocuments(filter);
     return json(res, 200, pageResult(rows.map(normalizeDoc), page, size, total));
+  }
+
+  if (req.method === "DELETE" && parts[0] === "content" && parts[1] && parts[2]) {
+    const type = requireString(parts[1], "Type de contenu", { min: 3, max: 20 }).toUpperCase();
+    const contentId = validateId(parts[2], "Contenu");
+    await deleteContentByType(type, contentId, { posts, comments, stories, videos });
+    await reports.updateMany(
+      { contentType: type, contentId },
+      { $set: { status: "RESOLVED", action: "DELETE", resolvedBy: userId, resolvedAt: new Date().toISOString() } }
+    );
+    await writeAuditLog(auditLogs, userId, `${type}_DELETED`, { contentId });
+    return json(res, 200, ok({ id: contentId, type }, "Contenu supprimé"));
   }
 
   if (req.method === "DELETE" && parts[0] === "posts" && parts[1]) {
     const postId = validateId(parts[1], "Publication");
-    await deletePostCascade(posts, comments, postId);
+    await deleteContentByType("POST", postId, { posts, comments, stories, videos });
     await writeAuditLog(auditLogs, userId, "POST_DELETED", { postId });
     return json(res, 200, ok({ id: postId }, "Publication supprimée"));
+  }
+
+  if (req.method === "POST" && parts[0] === "notifications" && parts[1] === "broadcast") {
+    if (!hasAnyRole(effectiveAuth, ["ADMIN"])) return json(res, 403, error("Action réservée aux admins"));
+    const body = await readBody(req);
+    const title = requireString(body.title, "Titre", { min: 3, max: 120 });
+    const message = requireString(body.body || body.message, "Message", { min: 3, max: 800 });
+    const target = String(body.target || "ALL").toUpperCase();
+    const targetFilter = target === "ACTIVE" ? { suspended: { $ne: true } } : {};
+    const recipients = await profiles.find(targetFilter, { projection: { _id: 1 } }).limit(5000).toArray();
+    await Promise.all(recipients.map((recipient) => createNotification(postDb, String(recipient._id), {
+      type: "moderation",
+      title,
+      body: message,
+      actorId: userId,
+      entityId: "admin-broadcast",
+    })));
+    await writeAuditLog(auditLogs, userId, "NOTIFICATION_BROADCAST", { title, target, recipients: recipients.length });
+    return json(res, 200, ok({ sent: recipients.length }));
   }
 
   if (req.method === "GET" && parts[0] === "audit") {
@@ -1668,6 +1740,25 @@ async function deletePostCascade(posts, comments, postId) {
     posts.deleteOne({ _id: makeId(postId) }),
     comments.deleteMany({ postId }),
   ]);
+}
+
+function contentCollectionForType(type, collections) {
+  if (type === "POST") return collections.posts;
+  if (type === "COMMENT") return collections.comments;
+  if (type === "STORY") return collections.stories;
+  if (type === "VIDEO") return collections.videos;
+  return null;
+}
+
+async function deleteContentByType(type, contentId, collections) {
+  if (type === "POST") return deletePostCascade(collections.posts, collections.comments, contentId);
+  const collection = contentCollectionForType(type, collections);
+  if (!collection) {
+    const err = new Error("Type de contenu invalide");
+    err.status = 400;
+    throw err;
+  }
+  await collection.deleteOne({ _id: makeId(contentId) });
 }
 
 function hasAnyRole(auth, roles) {
