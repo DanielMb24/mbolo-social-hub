@@ -1445,7 +1445,8 @@ async function syncFollowCounts(database, followerId, followingId) {
 
 async function createNotification(database, userId, payload) {
   if (!userId) return;
-  const notifications = database.collection(COLLECTIONS.notifications);
+  const notificationDb = await serviceDb("post");
+  const notifications = notificationDb.collection(COLLECTIONS.notifications);
   const actorInitials = String(payload.actorId || "U").slice(0, 2).toUpperCase();
   await notifications.insertOne({
     userId,

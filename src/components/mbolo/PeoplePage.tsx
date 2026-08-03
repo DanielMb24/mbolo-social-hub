@@ -120,10 +120,12 @@ const PeoplePage = () => {
 
     setLoadingFollow(prev => new Set(prev).add(userId));
     const isCurrentlyFollowing = followingUsers.has(userId);
+    let shouldChangeFollowerCount = false;
 
     try {
       if (isCurrentlyFollowing) {
         await userApi.unfollowUser(userId);
+        shouldChangeFollowerCount = true;
         setFollowingUsers(prev => {
           const newSet = new Set(prev);
           newSet.delete(userId);
@@ -131,9 +133,14 @@ const PeoplePage = () => {
         });
         toast({ title: "✅ Désabonné", description: "Vous ne suivez plus cet utilisateur" });
       } else {
-        await userApi.followUser(userId);
-        setFollowingUsers(prev => new Set(prev).add(userId));
-        toast({ title: "✅ Abonné", description: "Vous suivez maintenant cet utilisateur" });
+        const result = await userApi.followUser(userId);
+        if (result.status === "PENDING") {
+          toast({ title: "Demande envoyée", description: "Ce profil privé doit accepter votre demande" });
+        } else {
+          shouldChangeFollowerCount = true;
+          setFollowingUsers(prev => new Set(prev).add(userId));
+          toast({ title: "✅ Abonné", description: "Vous suivez maintenant cet utilisateur" });
+        }
       }
 
       setUsers(prevUsers =>
@@ -142,8 +149,8 @@ const PeoplePage = () => {
             ? {
                 ...user,
                 followersCount: isCurrentlyFollowing
-                  ? user.followersCount - 1
-                  : user.followersCount + 1
+                  ? Math.max(0, user.followersCount - 1)
+                  : shouldChangeFollowerCount ? user.followersCount + 1 : user.followersCount
               }
             : user
         )
